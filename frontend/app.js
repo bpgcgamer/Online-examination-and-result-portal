@@ -1,4 +1,4 @@
-const API_BASE = "http://localhost:4000/api";
+const API_BASE = "/api";
 const SESSION_KEY = "examPortalSession";
 const app = document.getElementById("app");
 
