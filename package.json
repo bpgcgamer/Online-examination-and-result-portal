@@ -1,0 +1,15 @@
+{
+  "name": "online-exam-dbms-portal",
+  "version": "1.0.0",
+  "description": "DBMS-backed online examination and result portal",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "latest",
+    "dotenv": "latest",
+    "express": "latest",
+    "mysql2": "latest"
+  }
+}
