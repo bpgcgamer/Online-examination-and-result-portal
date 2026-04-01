@@ -8,9 +8,9 @@ CALL Add_Student('aarav.shah@example.com', 'stud123', 'Aarav', 'Shah', 'ENR001')
 CALL Add_Student('diya.mehta@example.com', 'stud123', 'Diya', 'Mehta', 'ENR002');
 CALL Add_Student('kabir.nanda@example.com', 'stud123', 'Kabir', 'Nanda', 'ENR003');
 
-INSERT INTO exam (exam_code, title, duration_minutes, total_marks, pass_mark, remarks, created_by_admin_id) VALUES
-('DBMS-MID-01', 'DBMS Midterm', 60, 100, 40, 'Good effort. Revise normalization and joins.', 1),
-('SQL-FIN-01', 'SQL Final', 75, 100, 50, 'Focus on aggregate functions and views.', 2);
+INSERT INTO exam (exam_code, title, duration_minutes, total_marks, pass_mark, created_by_admin_id) VALUES
+('DBMS-MID-01', 'DBMS Midterm', 60, 100, 40, 1),
+('SQL-FIN-01', 'SQL Final', 75, 100, 50, 2);
 
 INSERT INTO question (exam_id, question_text, option_1, option_2, option_3, option_4, correct_answer, marks_allocated) VALUES
 (1, 'What does DBMS stand for?', 'Data Backup Management System', 'Database Management System', 'Digital Base Monitoring Software', 'Data Batch Management Setup', 2, 5),

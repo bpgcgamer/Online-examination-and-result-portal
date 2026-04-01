@@ -32,7 +32,6 @@ CREATE TABLE exam (
   duration_minutes INT NOT NULL CHECK (duration_minutes > 0),
   total_marks INT NOT NULL DEFAULT 100 CHECK (total_marks > 0 AND total_marks <= 1000),
   pass_mark DECIMAL(5,2) NOT NULL DEFAULT 40.00 CHECK (pass_mark >= 0 AND pass_mark <= 100),
-  remarks VARCHAR(255) NULL,
   created_by_admin_id INT NOT NULL,
   CONSTRAINT fk_exam_admin FOREIGN KEY (created_by_admin_id) REFERENCES admin(admin_id)
 );
@@ -61,4 +60,14 @@ CREATE TABLE result (
   attempt_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_result_student FOREIGN KEY (student_id) REFERENCES student(student_id),
   CONSTRAINT fk_result_exam FOREIGN KEY (exam_id) REFERENCES exam(exam_id)
+);
+
+CREATE TABLE attempt_answer (
+  attempt_answer_id INT AUTO_INCREMENT PRIMARY KEY,
+  result_id INT NOT NULL,
+  question_id INT NOT NULL,
+  selected_option TINYINT NOT NULL CHECK (selected_option BETWEEN 0 AND 4),
+  is_correct BOOLEAN NOT NULL DEFAULT FALSE,
+  CONSTRAINT fk_attempt_answer_result FOREIGN KEY (result_id) REFERENCES result(result_id) ON DELETE CASCADE,
+  CONSTRAINT fk_attempt_answer_question FOREIGN KEY (question_id) REFERENCES question(question_id) ON DELETE CASCADE
 );

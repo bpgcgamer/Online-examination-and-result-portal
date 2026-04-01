@@ -173,9 +173,6 @@ async function renderAdminDashboard() {
       <label for="durationMinutes">Duration (minutes)</label>
       <input id="durationMinutes" type="number" min="10" value="60" />
 
-      <label for="examRemarks">Professor Remarks (shown in result portal)</label>
-      <textarea id="examRemarks" placeholder="e.g. Focus more on normalization topics."></textarea>
-
       <h3 class="space-top">Add Questions</h3>
       <div id="questionsBuilder"></div>
       <button class="btn-muted" id="addQuestionBtn">Add Question</button>
@@ -186,14 +183,23 @@ async function renderAdminDashboard() {
       <h3>Existing Exams</h3>
       <div id="examList"></div>
     </section>
+
+    <section class="card">
+      <h3>Student Performance (My Exams)</h3>
+      <div id="analyticsList"></div>
+    </section>
   `;
 
   let exams = [];
+  let analytics = [];
   try {
-    const response = await fetch(`${API_BASE}/exams`);
+    const response = await fetch(`${API_BASE}/exams?createdByAdminId=${session.userId}`);
     exams = await response.json();
+    const analyticsRes = await fetch(`${API_BASE}/admin/${session.userId}/analytics`);
+    analytics = await analyticsRes.json();
   } catch (_error) {
     exams = [];
+    analytics = [];
   }
 
   const builder = document.getElementById("questionsBuilder");
@@ -261,10 +267,67 @@ async function renderAdminDashboard() {
           <strong>${exam.title}</strong>
           <div class="small">Code: ${exam.exam_code} | Duration: ${exam.duration_minutes} mins</div>
           <div class="small">Total Marks: ${exam.total_marks} | Pass Mark: ${exam.pass_mark}%</div>
-          <div class="small">Remarks: ${exam.remarks || "None"}</div>
         </div>
       `
       )
+      .join("");
+  }
+
+  function renderAnalytics() {
+    const analyticsList = document.getElementById("analyticsList");
+    if (!analytics.length) {
+      analyticsList.innerHTML = `<p class="small">No analytics yet because you have not created any exams.</p>`;
+      return;
+    }
+
+    analyticsList.innerHTML = analytics
+      .map((exam) => {
+        const attemptsHeader = `
+          <div class="small">
+            Attempts: ${exam.attemptsCount} | Average Score: ${
+              exam.averagePercentage === null ? "N/A" : `${exam.averagePercentage}%`
+            }
+          </div>
+        `;
+
+        const attemptDetails = exam.performance.length
+          ? exam.performance
+              .map((p) => {
+                const wrongs = p.wrongQuestions.length
+                  ? p.wrongQuestions
+                      .map(
+                        (w) => `
+                        <li>
+                          <strong>Q${w.questionId}:</strong> ${w.questionText}<br />
+                          <span class="small">Selected Option: ${w.selectedOption || "Not answered"} | Correct Option: ${w.correctAnswer}</span>
+                        </li>
+                      `
+                      )
+                      .join("")
+                  : `<li><span class="small">No wrong answers in this attempt.</span></li>`;
+
+                return `
+                  <div class="question-box">
+                    <div><strong>${p.studentName}</strong> (${p.status})</div>
+                    <div class="small">Score: ${p.rawScore}/${p.totalMarks} (${p.percentage}%)</div>
+                    <div class="small">Attempted On: ${formatDateTime(p.attemptDate)}</div>
+                    <div class="small space-top"><strong>Wrong Questions:</strong></div>
+                    <ul class="small">${wrongs}</ul>
+                  </div>
+                `;
+              })
+              .join("")
+          : `<p class="small">No student attempts yet for this exam.</p>`;
+
+        return `
+          <div class="question-box">
+            <strong>${exam.examTitle}</strong>
+            <div class="small">Code: ${exam.examCode}</div>
+            ${attemptsHeader}
+            <div class="space-top">${attemptDetails}</div>
+          </div>
+        `;
+      })
       .join("");
   }
 
@@ -276,8 +339,6 @@ async function renderAdminDashboard() {
     const examCode = document.getElementById("examCode").value.trim();
     const passMark = Number(document.getElementById("examPassMark").value);
     const durationMinutes = Number(document.getElementById("durationMinutes").value);
-    const remarks = document.getElementById("examRemarks").value.trim();
-
     if (!title || !examCode) {
       alert("Please provide exam title and code.");
       return;
@@ -301,7 +362,6 @@ async function renderAdminDashboard() {
       title,
       durationMinutes,
       passMark,
-      remarks,
       questions: questions.map((q) => ({
         questionText: q.text,
         option1: q.options[0],
@@ -330,6 +390,7 @@ async function renderAdminDashboard() {
   addQuestionUI();
   bindBuilderInputs();
   renderExamList();
+  renderAnalytics();
 }
 
 async function renderStudentDashboard() {
@@ -378,7 +439,6 @@ async function renderStudentDashboard() {
               : '<span class="pill pill-danger">Fail</span>'
           }</div>
           <div class="small">Attempt Date: ${formatDateTime(r.attempt_date)}</div>
-          <div class="small">Remarks: ${r.remarks || "None"}</div>
         </div>
       `
         )
