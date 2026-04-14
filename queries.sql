@@ -12,6 +12,8 @@ SELECT
   r.raw_score,
   r.total_marks_snapshot AS total_marks,
   r.score_obtained AS percentage,
+  r.attempt_number,
+  r.is_best_score,
   r.status,
   r.attempt_date,
   CASE
@@ -59,3 +61,30 @@ FROM student s
 LEFT JOIN result r ON r.student_id = s.student_id
 GROUP BY s.student_id, s.first_name, s.last_name, s.total_attempts
 ORDER BY avg_score DESC;
+
+-- 3) Reattempt and improvement tracking per student and exam
+SELECT
+  s.student_id,
+  CONCAT(s.first_name, ' ', s.last_name) AS student_name,
+  e.exam_id,
+  e.title AS exam_title,
+  COUNT(r.result_id) AS total_attempts,
+  MIN(r.score_obtained) AS first_score,
+  MAX(r.score_obtained) AS best_score,
+  SUBSTRING_INDEX(
+    GROUP_CONCAT(r.score_obtained ORDER BY r.attempt_number DESC),
+    ',',
+    1
+  ) AS latest_score,
+  (
+    SUBSTRING_INDEX(
+      GROUP_CONCAT(r.score_obtained ORDER BY r.attempt_number DESC),
+      ',',
+      1
+    ) - MIN(r.score_obtained)
+  ) AS improvement
+FROM result r
+JOIN student s ON s.student_id = r.student_id
+JOIN exam e ON e.exam_id = r.exam_id
+GROUP BY s.student_id, s.first_name, s.last_name, e.exam_id, e.title
+ORDER BY s.student_id, e.exam_id;

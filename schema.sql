@@ -4,6 +4,8 @@ USE online_exam_portal;
 DROP TABLE IF EXISTS result;
 DROP TABLE IF EXISTS question;
 DROP TABLE IF EXISTS exam;
+DROP TABLE IF EXISTS mentor_student_map;
+DROP TABLE IF EXISTS mentor;
 DROP TABLE IF EXISTS student;
 DROP TABLE IF EXISTS admin;
 
@@ -22,6 +24,22 @@ CREATE TABLE student (
   last_name VARCHAR(60) NOT NULL,
   enrollment_no VARCHAR(40) NOT NULL UNIQUE,
   total_attempts INT NOT NULL DEFAULT 0 CHECK (total_attempts >= 0)
+);
+
+CREATE TABLE mentor (
+  mentor_id INT AUTO_INCREMENT PRIMARY KEY,
+  username VARCHAR(50) NOT NULL UNIQUE,
+  password VARCHAR(255) NOT NULL,
+  full_name VARCHAR(100) NOT NULL
+);
+
+CREATE TABLE mentor_student_map (
+  mentor_id INT NOT NULL,
+  student_id INT NOT NULL,
+  assigned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (mentor_id, student_id),
+  CONSTRAINT fk_msm_mentor FOREIGN KEY (mentor_id) REFERENCES mentor(mentor_id) ON DELETE CASCADE,
+  CONSTRAINT fk_msm_student FOREIGN KEY (student_id) REFERENCES student(student_id) ON DELETE CASCADE
 );
 
 CREATE TABLE exam (
@@ -53,9 +71,11 @@ CREATE TABLE result (
   result_id INT AUTO_INCREMENT PRIMARY KEY,
   student_id INT NOT NULL,
   exam_id INT NOT NULL,
+  attempt_number INT NOT NULL CHECK (attempt_number > 0),
   raw_score INT NOT NULL DEFAULT 0 CHECK (raw_score >= 0),
   total_marks_snapshot INT NOT NULL CHECK (total_marks_snapshot > 0),
   score_obtained DECIMAL(5,2) NOT NULL CHECK (score_obtained >= 0 AND score_obtained <= 100),
+  is_best_score BOOLEAN NOT NULL DEFAULT FALSE,
   status ENUM('Pass', 'Fail') NOT NULL,
   attempt_date DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_result_student FOREIGN KEY (student_id) REFERENCES student(student_id),

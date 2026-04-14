@@ -29,7 +29,7 @@ function renderAuthScreen(mode = "login", error = "", info = "") {
   const isSignup = mode === "signup";
   const title = isSignup ? "Sign Up" : "Login";
   const helper = isSignup
-    ? "Create your account as Student or Admin."
+    ? "Create your account as Student, Admin, or Mentor."
     : "Use your credentials to continue.";
   const nameField = isSignup
     ? `
@@ -53,10 +53,11 @@ function renderAuthScreen(mode = "login", error = "", info = "") {
           <select id="role">
             <option value="student">Student</option>
             <option value="admin">Admin</option>
+            <option value="mentor">Mentor</option>
           </select>
         </div>
         <div>
-          <label for="identifier">${isSignup ? "Username / Email" : "Username (Admin) or Email (Student)"}</label>
+          <label for="identifier">${isSignup ? "Username / Email" : "Username (Admin/Mentor) or Email (Student)"}</label>
           <input id="identifier" placeholder="${isSignup ? "Enter username or email" : "Enter username/email"}" />
         </div>
         <div>
@@ -99,7 +100,16 @@ function renderAuthScreen(mode = "login", error = "", info = "") {
 
     if (isSignup) {
       const payload =
-        role === "admin"
+        role === "student"
+          ? {
+              role: "student",
+              email: identifier,
+              password,
+              firstName: fullName.split(" ")[0],
+              lastName: fullName.split(" ").slice(1).join(" "),
+              enrollmentNo: `ENR-${Date.now().toString().slice(-6)}`
+            }
+          : role === "admin"
           ? {
               role: "admin",
               fullName,
@@ -107,12 +117,10 @@ function renderAuthScreen(mode = "login", error = "", info = "") {
               password
             }
           : {
-              role: "student",
-              email: identifier,
+              role: "mentor",
+              fullName,
+              username: identifier,
               password,
-              firstName: fullName.split(" ")[0],
-              lastName: fullName.split(" ").slice(1).join(" "),
-              enrollmentNo: `ENR-${Date.now().toString().slice(-6)}`
             };
 
       fetch(`${API_BASE}/auth/signup`, {
@@ -188,18 +196,46 @@ async function renderAdminDashboard() {
       <h3>Student Performance (My Exams)</h3>
       <div id="analyticsList"></div>
     </section>
+
+    <section class="card">
+      <h3>Mentor-Student Assignment</h3>
+      <div class="row">
+        <div>
+          <label for="mentorSelect">Select Mentor</label>
+          <select id="mentorSelect"></select>
+        </div>
+        <div>
+          <label for="studentSelect">Select Student</label>
+          <select id="studentSelect"></select>
+        </div>
+      </div>
+      <button class="btn-primary" id="assignMentorBtn">Assign Student To Mentor</button>
+      <div id="assignmentList" class="space-top"></div>
+    </section>
   `;
 
   let exams = [];
   let analytics = [];
+  let mentors = [];
+  let students = [];
+  let assignments = [];
   try {
     const response = await fetch(`${API_BASE}/exams?createdByAdminId=${session.userId}`);
     exams = await response.json();
     const analyticsRes = await fetch(`${API_BASE}/admin/${session.userId}/analytics`);
     analytics = await analyticsRes.json();
+    const mentorsRes = await fetch(`${API_BASE}/mentors`);
+    mentors = await mentorsRes.json();
+    const studentsRes = await fetch(`${API_BASE}/students`);
+    students = await studentsRes.json();
+    const assignmentsRes = await fetch(`${API_BASE}/mentor-assignments`);
+    assignments = await assignmentsRes.json();
   } catch (_error) {
     exams = [];
     analytics = [];
+    mentors = [];
+    students = [];
+    assignments = [];
   }
 
   const builder = document.getElementById("questionsBuilder");
@@ -211,7 +247,8 @@ async function renderAdminDashboard() {
       text: "",
       options: ["", "", "", ""],
       correctIndex: 0,
-      marks: 1
+      marks: 5,
+      topic: "General"
     });
 
     const block = document.createElement("div");
@@ -230,8 +267,10 @@ async function renderAdminDashboard() {
       <input data-field="option3" data-index="${index}" placeholder="Option 4" />
       <label>Correct Option (1-4)</label>
       <input data-field="correctIndex" data-index="${index}" type="number" min="1" max="4" value="1" />
+      <label>Topic</label>
+      <input data-field="topic" data-index="${index}" value="General" placeholder="e.g. Normalization, Joins, Indexing" />
       <label>Marks</label>
-      <input data-field="marks" data-index="${index}" type="number" min="1" value="1" />
+      <input data-field="marks" data-index="${index}" type="number" min="5" step="5" value="5" />
     `;
     builder.appendChild(block);
   }
@@ -244,12 +283,19 @@ async function renderAdminDashboard() {
       if (Number.isNaN(i) || !field) return;
 
       if (field === "text") questions[i].text = target.value.trim();
+      if (field === "topic") questions[i].topic = target.value.trim() || "General";
       if (field.startsWith("option")) {
         const optionIndex = Number(field.replace("option", ""));
         questions[i].options[optionIndex] = target.value.trim();
       }
       if (field === "correctIndex") questions[i].correctIndex = Number(target.value) - 1;
-      if (field === "marks") questions[i].marks = Number(target.value);
+      if (field === "marks") {
+        const entered = Number(target.value);
+        if (Number.isNaN(entered)) return;
+        const normalized = Math.max(5, Math.round(entered / 5) * 5);
+        questions[i].marks = normalized;
+        target.value = normalized;
+      }
     });
   }
 
@@ -331,9 +377,85 @@ async function renderAdminDashboard() {
       .join("");
   }
 
+  function renderAssignmentControls() {
+    const mentorSelect = document.getElementById("mentorSelect");
+    const studentSelect = document.getElementById("studentSelect");
+    const assignmentList = document.getElementById("assignmentList");
+
+    mentorSelect.innerHTML = mentors.length
+      ? mentors.map((m) => `<option value="${m.mentor_id}">${m.full_name} (${m.username})</option>`).join("")
+      : `<option value="">No mentors found</option>`;
+
+    studentSelect.innerHTML = students.length
+      ? students
+          .map(
+            (s) =>
+              `<option value="${s.student_id}">${s.first_name} ${s.last_name} (${s.enrollment_no})</option>`
+          )
+          .join("")
+      : `<option value="">No students found</option>`;
+
+    if (!assignments.length) {
+      assignmentList.innerHTML = `<p class="small">No mentor-student assignments yet.</p>`;
+      return;
+    }
+
+    assignmentList.innerHTML = assignments
+      .map(
+        (a) => `
+        <div class="question-box">
+          <div><strong>${a.mentor_name}</strong> (${a.mentor_username})</div>
+          <div class="small">Assigned Student: ${a.student_name} (${a.enrollment_no})</div>
+          <div class="small">Assigned On: ${formatDateTime(a.assigned_at)}</div>
+          <button class="btn-danger remove-assignment-btn" data-mentor-id="${a.mentor_id}" data-student-id="${a.student_id}">
+            Remove Assignment
+          </button>
+        </div>
+      `
+      )
+      .join("");
+
+    document.querySelectorAll(".remove-assignment-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        fetch(`${API_BASE}/mentor-assignments/${btn.dataset.mentorId}/${btn.dataset.studentId}`, {
+          method: "DELETE"
+        })
+          .then(async (res) => ({ ok: res.ok, data: await res.json() }))
+          .then(({ ok, data }) => {
+            if (!ok) throw new Error(data.message || "Failed to remove assignment.");
+            alert("Assignment removed.");
+            renderAdminDashboard();
+          })
+          .catch((err) => alert(err.message));
+      });
+    });
+  }
+
   document.getElementById("logoutBtn").addEventListener("click", clearSession);
 
   document.getElementById("addQuestionBtn").addEventListener("click", addQuestionUI);
+  document.getElementById("assignMentorBtn").addEventListener("click", () => {
+    const mentorId = Number(document.getElementById("mentorSelect").value);
+    const studentId = Number(document.getElementById("studentSelect").value);
+    if (!mentorId || !studentId) {
+      alert("Please select both mentor and student.");
+      return;
+    }
+
+    fetch(`${API_BASE}/mentor-assignments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mentorId, studentId })
+    })
+      .then(async (res) => ({ ok: res.ok, data: await res.json() }))
+      .then(({ ok, data }) => {
+        if (!ok) throw new Error(data.message || "Assignment failed.");
+        alert("Student assigned to mentor successfully.");
+        renderAdminDashboard();
+      })
+      .catch((err) => alert(err.message));
+  });
+
   document.getElementById("saveExamBtn").addEventListener("click", () => {
     const title = document.getElementById("examTitle").value.trim();
     const examCode = document.getElementById("examCode").value.trim();
@@ -350,7 +472,15 @@ async function renderAdminDashboard() {
 
     for (let i = 0; i < questions.length; i += 1) {
       const q = questions[i];
-      if (!q.text || q.options.some((op) => !op) || q.correctIndex < 0 || q.correctIndex > 3 || q.marks < 1) {
+      if (
+        !q.text ||
+        q.options.some((op) => !op) ||
+        !q.topic ||
+        q.correctIndex < 0 ||
+        q.correctIndex > 3 ||
+        q.marks < 5 ||
+        q.marks % 5 !== 0
+      ) {
         alert(`Question ${i + 1} is incomplete or invalid.`);
         return;
       }
@@ -369,7 +499,8 @@ async function renderAdminDashboard() {
         option3: q.options[2],
         option4: q.options[3],
         correctAnswer: q.correctIndex + 1,
-        marksAllocated: q.marks
+        marksAllocated: q.marks,
+        topic: q.topic
       }))
     };
 
@@ -391,6 +522,91 @@ async function renderAdminDashboard() {
   bindBuilderInputs();
   renderExamList();
   renderAnalytics();
+  renderAssignmentControls();
+}
+
+function groupResultsByExam(results) {
+  const grouped = new Map();
+  for (const row of results) {
+    if (!grouped.has(row.exam_title)) grouped.set(row.exam_title, []);
+    grouped.get(row.exam_title).push(row);
+  }
+  for (const [, arr] of grouped) {
+    arr.sort((a, b) => Number(a.attempt_number) - Number(b.attempt_number));
+  }
+  return grouped;
+}
+
+function buildTrendSvg(resultsForExam) {
+  const width = 440;
+  const height = 170;
+  const padding = 28;
+  if (!resultsForExam.length) return "";
+
+  const points = resultsForExam.map((r, idx) => {
+    const x =
+      resultsForExam.length === 1
+        ? width / 2
+        : padding + (idx * (width - 2 * padding)) / (resultsForExam.length - 1);
+    const y = padding + ((100 - Number(r.score_obtained)) * (height - 2 * padding)) / 100;
+    return { x, y, label: Number(r.score_obtained), attempt: Number(r.attempt_number) };
+  });
+
+  const linePath = points
+    .map((p, idx) => `${idx === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`)
+    .join(" ");
+
+  return `
+    <svg viewBox="0 0 ${width} ${height}" class="trend-chart" role="img" aria-label="Performance trend chart">
+      <line x1="${padding}" y1="${height - padding}" x2="${width - padding}" y2="${height - padding}" stroke="#c4ccee" stroke-width="1.5" />
+      <line x1="${padding}" y1="${padding}" x2="${padding}" y2="${height - padding}" stroke="#c4ccee" stroke-width="1.5" />
+      <line x1="${padding}" y1="${padding}" x2="${width - padding}" y2="${padding}" stroke="#e7ebfb" stroke-width="1" />
+      <line x1="${padding}" y1="${(height + padding) / 2}" x2="${width - padding}" y2="${(height + padding) / 2}" stroke="#eef2ff" stroke-width="1" />
+      <path d="${linePath}" fill="none" stroke="#5b4bdb" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+      ${points
+        .map(
+          (p) => `
+          <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4.5" fill="#14b8a6" />
+          <text x="${p.x.toFixed(1)}" y="${(p.y - 10).toFixed(1)}" text-anchor="middle" font-size="11" fill="#1b1f3b">${p.label}%</text>
+          <text x="${p.x.toFixed(1)}" y="${(height - 10).toFixed(1)}" text-anchor="middle" font-size="10" fill="#5f6785">A${p.attempt}</text>
+        `
+        )
+        .join("")}
+    </svg>
+  `;
+}
+
+function buildSubjectBarChartSvg(subjectAverages) {
+  const width = 760;
+  const height = 240;
+  const padding = 40;
+  if (!subjectAverages.length) return "";
+
+  const barGap = 18;
+  const availableWidth = width - 2 * padding;
+  const barWidth = Math.max(40, (availableWidth - barGap * (subjectAverages.length - 1)) / subjectAverages.length);
+
+  return `
+    <svg viewBox="0 0 ${width} ${height}" class="subject-bar-chart" role="img" aria-label="Average performance by subject bar chart">
+      <line x1="${padding}" y1="${height - padding}" x2="${width - padding}" y2="${height - padding}" stroke="#c4ccee" stroke-width="1.5" />
+      <line x1="${padding}" y1="${padding}" x2="${padding}" y2="${height - padding}" stroke="#c4ccee" stroke-width="1.5" />
+      ${subjectAverages
+        .map((s, i) => {
+          const x = padding + i * (barWidth + barGap);
+          const barHeight = (Number(s.average) / 100) * (height - 2 * padding);
+          const y = height - padding - barHeight;
+          const shortLabel = s.subject.length > 12 ? `${s.subject.slice(0, 12)}...` : s.subject;
+          return `
+            <rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${barHeight.toFixed(
+              1
+            )}" rx="6" fill="#5b4bdb" />
+            <text x="${(x + barWidth / 2).toFixed(1)}" y="${(y - 8).toFixed(1)}" text-anchor="middle" font-size="11" fill="#1b1f3b">${s.average}%</text>
+            <text x="${(x + barWidth / 2).toFixed(1)}" y="${(height - 16).toFixed(1)}" text-anchor="middle" font-size="10" fill="#5f6785">${shortLabel}</text>
+          `;
+        })
+        .join("")}
+    </svg>
+  `;
 }
 
 async function renderStudentDashboard() {
@@ -398,16 +614,12 @@ async function renderStudentDashboard() {
   app.className = "";
 
   let exams = [];
-  let myResults = [];
 
   try {
     const examRes = await fetch(`${API_BASE}/exams`);
     exams = await examRes.json();
-    const resultRes = await fetch(`${API_BASE}/results/student/${session.userId}`);
-    myResults = await resultRes.json();
   } catch (_error) {
     exams = [];
-    myResults = [];
   }
 
   const examsHtml = exams.length
@@ -426,25 +638,6 @@ async function renderStudentDashboard() {
         .join("")
     : `<p class="small">No exams available right now.</p>`;
 
-  const resultsHtml = myResults.length
-    ? myResults
-        .map(
-          (r) => `
-        <div class="result-card">
-          <strong>${r.exam_title}</strong>
-          <div class="small">Score: ${r.raw_score} / ${r.total_marks_snapshot} (${r.score_obtained}%)</div>
-          <div class="small">Status: ${
-            r.status === "Pass"
-              ? '<span class="pill pill-success">Pass</span>'
-              : '<span class="pill pill-danger">Fail</span>'
-          }</div>
-          <div class="small">Attempt Date: ${formatDateTime(r.attempt_date)}</div>
-        </div>
-      `
-        )
-        .join("")
-    : `<p class="small">No attempts yet.</p>`;
-
   app.innerHTML = `
     <section class="card">
       <div class="row">
@@ -462,10 +655,12 @@ async function renderStudentDashboard() {
       <h3>Available Exams</h3>
       ${examsHtml}
     </section>
-
     <section class="card">
-      <h3>Result Portal</h3>
-      <div class="result-grid">${resultsHtml}</div>
+      <h3>Results & Performance</h3>
+      <p class="small">Open the dedicated result portal with full statistics and trend graphs.</p>
+      <button class="btn-secondary" id="openResultPortalBtn">Open Result Portal</button>
+      <p class="small space-top">See which topics you struggled with most, broken down by exam.</p>
+      <button class="btn-secondary" id="openWeakAreaPortalBtn">Weak Area Analysis</button>
     </section>
   `;
 
@@ -473,6 +668,531 @@ async function renderStudentDashboard() {
   document.querySelectorAll(".start-exam").forEach((btn) => {
     btn.addEventListener("click", () => renderExamAttempt(btn.dataset.examId));
   });
+  document.getElementById("openResultPortalBtn").addEventListener("click", renderStudentResultPortal);
+  document.getElementById("openWeakAreaPortalBtn").addEventListener("click", renderWeakAreaPortal);
+}
+
+async function renderStudentResultPortal() {
+  const session = readSession();
+  app.className = "";
+
+  let myResults = [];
+  let improvementRows = [];
+  try {
+    const resultRes = await fetch(`${API_BASE}/results/student/${session.userId}`);
+    myResults = await resultRes.json();
+    const improveRes = await fetch(`${API_BASE}/results/student/${session.userId}/improvement`);
+    improvementRows = await improveRes.json();
+  } catch (_error) {
+    myResults = [];
+    improvementRows = [];
+  }
+
+  const grouped = groupResultsByExam(myResults);
+  const subjectAverages = Array.from(grouped.entries()).map(([examTitle, attempts]) => {
+    const avg =
+      attempts.reduce((sum, a) => sum + Number(a.score_obtained), 0) / (attempts.length || 1);
+    return {
+      subject: examTitle,
+      average: Number(avg.toFixed(2)),
+      attempts: attempts.length
+    };
+  });
+  const totalAttempts = myResults.length;
+  const avgScore =
+    totalAttempts === 0
+      ? 0
+      : (myResults.reduce((sum, r) => sum + Number(r.score_obtained), 0) / totalAttempts).toFixed(2);
+  const bestScore =
+    totalAttempts === 0 ? 0 : Math.max(...myResults.map((r) => Number(r.score_obtained))).toFixed(2);
+  const passCount = myResults.filter((r) => r.status === "Pass").length;
+  const passRate = totalAttempts === 0 ? 0 : ((passCount / totalAttempts) * 100).toFixed(1);
+
+  const examCards = Array.from(grouped.entries()).length
+    ? Array.from(grouped.entries())
+        .map(([examTitle, attempts]) => {
+          const chartSvg = buildTrendSvg(attempts);
+          const improve = improvementRows.find((r) => r.exam_title === examTitle);
+          const trendLabel = improve
+            ? `${improve.improvement >= 0 ? "+" : ""}${improve.improvement}% improvement`
+            : "N/A";
+          return `
+            <section class="card result-portal-card">
+              <h3>${examTitle}</h3>
+              <div class="result-grid portal-mini-stats">
+                <div class="result-card"><div class="small">Attempts</div><strong>${attempts.length}</strong></div>
+                <div class="result-card"><div class="small">Latest</div><strong>${attempts[attempts.length - 1].score_obtained}%</strong></div>
+                <div class="result-card"><div class="small">Best</div><strong>${Math.max(
+                  ...attempts.map((a) => Number(a.score_obtained))
+                )}%</strong></div>
+                <div class="result-card"><div class="small">Trend</div><strong>${trendLabel}</strong></div>
+              </div>
+              <div class="trend-wrap">
+                ${chartSvg}
+              </div>
+              <div class="small"><strong>Attempt-wise Performance:</strong></div>
+              <div class="attempt-list">
+                ${attempts
+                  .map(
+                    (a) => `
+                    <div class="attempt-item">
+                      <div><strong>Attempt #${a.attempt_number}</strong> ${Number(a.is_best_score) === 1 ? "<span class='small'>(Best)</span>" : ""}</div>
+                      <div class="small">Score: ${a.raw_score}/${a.total_marks_snapshot} (${a.score_obtained}%)</div>
+                      <div class="small">Status: ${a.status} | Date: ${formatDateTime(a.attempt_date)}</div>
+                    </div>
+                  `
+                  )
+                  .join("")}
+              </div>
+            </section>
+          `;
+        })
+        .join("")
+    : `<section class="card"><p class="small">No attempts yet. Generate demo attempts or take an exam first.</p></section>`;
+
+  const subjectAvgHtml = subjectAverages.length
+    ? subjectAverages
+        .map(
+          (s) => `
+        <div class="result-card">
+          <strong>${s.subject}</strong>
+          <div class="small">Average Performance: ${s.average}%</div>
+          <div class="small">Total Attempts: ${s.attempts}</div>
+        </div>
+      `
+        )
+        .join("")
+    : `<p class="small">No subject performance data available yet.</p>`;
+  const subjectBarChart = buildSubjectBarChartSvg(subjectAverages);
+
+  app.innerHTML = `
+    <section class="card">
+      <div class="row">
+        <div>
+          <h2>Result Portal</h2>
+          <p class="small">Comprehensive performance and performance tracking analytics</p>
+        </div>
+        <div style="text-align:right;">
+          <button class="btn-muted" id="backToStudentHomeBtn">Back</button>
+          <button class="btn-secondary" id="openWeakAreaFromResultBtn">Weak Area Analysis</button>
+          <button class="btn-secondary" id="openTargetedPracticeFromResultBtn">Targeted Practice</button>
+          <button class="btn-muted" id="logoutBtn">Logout</button>
+        </div>
+      </div>
+      <div class="result-grid">
+        <div class="result-card"><div class="small">Total Attempts</div><strong>${totalAttempts}</strong></div>
+        <div class="result-card"><div class="small">Average Score</div><strong>${avgScore}%</strong></div>
+        <div class="result-card"><div class="small">Best Score</div><strong>${bestScore}%</strong></div>
+        <div class="result-card"><div class="small">Pass Rate</div><strong>${passRate}%</strong></div>
+      </div>
+      ${
+        totalAttempts === 0
+          ? '<button class="btn-secondary" id="generateDemoAttemptsBtn">Generate Demo Attempts</button>'
+          : ""
+      }
+    </section>
+
+    <section class="card">
+      <h3>Average Performance By Subject</h3>
+      <div class="trend-wrap">
+        ${subjectBarChart || '<p class="small">No subject chart data available.</p>'}
+      </div>
+      <div class="result-grid">${subjectAvgHtml}</div>
+    </section>
+
+    <section class="card">
+      <h3>Performance Tracking</h3>
+      <p class="small">Attempt-wise trend across each subject exam.</p>
+    </section>
+
+    ${examCards}
+  `;
+  document.getElementById("backToStudentHomeBtn").addEventListener("click", renderStudentDashboard);
+  document.getElementById("logoutBtn").addEventListener("click", clearSession);
+  document.getElementById("openWeakAreaFromResultBtn").addEventListener("click", renderWeakAreaPortal);
+  document
+    .getElementById("openTargetedPracticeFromResultBtn")
+    .addEventListener("click", () => renderTargetedPracticePortal());
+  const demoBtn = document.getElementById("generateDemoAttemptsBtn");
+  if (demoBtn) {
+    demoBtn.addEventListener("click", () => {
+      fetch(`${API_BASE}/results/student/${session.userId}/generate-demo-attempts`, { method: "POST" })
+        .then(async (res) => ({ ok: res.ok, data: await res.json() }))
+        .then(({ ok, data }) => {
+          if (!ok) throw new Error(data.message || "Failed to generate demo attempts.");
+          alert("Demo attempts created. Opening updated result portal.");
+          renderStudentResultPortal();
+        })
+        .catch((err) => alert(err.message));
+    });
+  }
+}
+
+async function renderWeakAreaPortal() {
+  const session = readSession();
+  app.className = "";
+
+  let byExam = [];
+  try {
+    const res = await fetch(`${API_BASE}/results/student/${session.userId}/weak-areas`);
+    byExam = await res.json();
+  } catch (_error) {
+    byExam = [];
+  }
+
+  let activeExamIdx = 0;
+
+  app.innerHTML = `
+    <section class="card">
+      <div class="row">
+        <div>
+          <h2>Weak Area Analysis</h2>
+          <p class="small">Topics ranked by how many questions you got wrong in each exam — not a percentage score.</p>
+        </div>
+        <div style="text-align:right;">
+          <button class="btn-muted" id="weakAreaBackBtn">Back</button>
+          <button class="btn-secondary" id="weakAreaToPracticeBtn">Targeted Practice</button>
+          <button class="btn-muted" id="weakAreaLogoutBtn">Logout</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>Weak topics by exam</h3>
+      <p class="small">Use the tabs to switch between exams. Higher in the list means more incorrect answers in that topic.</p>
+      <div class="exam-tab-bar" id="weakExamTabBar" role="tablist"></div>
+      <div id="weakExamTabPanel" class="exam-tab-panel"></div>
+    </section>
+  `;
+
+  function renderExamTabsAndPanel() {
+    const bar = document.getElementById("weakExamTabBar");
+    const panel = document.getElementById("weakExamTabPanel");
+    if (!byExam.length) {
+      bar.innerHTML = "";
+      panel.innerHTML = `<p class="small">No data yet. After you attempt exams, topics you missed most often appear here, per exam.</p>`;
+      return;
+    }
+    if (activeExamIdx >= byExam.length) activeExamIdx = 0;
+
+    bar.innerHTML = byExam
+      .map(
+        (ex, i) => `
+      <button type="button" class="exam-tab ${i === activeExamIdx ? "is-active" : ""}" data-index="${i}" role="tab" aria-selected="${i === activeExamIdx}">
+        ${ex.exam_title}
+      </button>
+    `
+      )
+      .join("");
+
+    const ex = byExam[activeExamIdx];
+    const listHtml =
+      ex.topics && ex.topics.length
+        ? `<ol class="weak-topic-list">
+            ${ex.topics
+              .map(
+                (t) => `
+              <li>
+                <strong>${t.topic}</strong>
+                <span class="small"> — ${t.wrong_count} wrong answer${t.wrong_count === 1 ? "" : "s"}</span>
+                ${
+                  t.total_answered > 0
+                    ? `<span class="small"> (${t.correct_count} correct of ${t.total_answered} in this topic)</span>`
+                    : ""
+                }
+              </li>
+            `
+              )
+              .join("")}
+          </ol>`
+        : `<p class="small">No topic breakdown for this exam yet.</p>`;
+
+    panel.innerHTML = `
+      <h4 class="space-top">${ex.exam_title}</h4>
+      ${listHtml}
+    `;
+
+    bar.querySelectorAll(".exam-tab").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        activeExamIdx = Number(btn.dataset.index);
+        renderExamTabsAndPanel();
+      });
+    });
+  }
+
+  document.getElementById("weakAreaBackBtn").addEventListener("click", renderStudentDashboard);
+  document.getElementById("weakAreaLogoutBtn").addEventListener("click", clearSession);
+  document.getElementById("weakAreaToPracticeBtn").addEventListener("click", () => {
+    const preset =
+      byExam.length && byExam[activeExamIdx] ? byExam[activeExamIdx].exam_id : undefined;
+    renderTargetedPracticePortal(preset);
+  });
+
+  renderExamTabsAndPanel();
+}
+
+async function renderTargetedPracticePortal(presetExamId) {
+  const session = readSession();
+  app.className = "";
+
+  let byExam = [];
+  try {
+    const weakAreaRes = await fetch(`${API_BASE}/results/student/${session.userId}/weak-areas`);
+    byExam = await weakAreaRes.json();
+  } catch (_error) {
+    byExam = [];
+  }
+
+  let activeExamIdx = 0;
+  if (presetExamId != null && byExam.length) {
+    const idx = byExam.findIndex((e) => Number(e.exam_id) === Number(presetExamId));
+    if (idx >= 0) activeExamIdx = idx;
+  }
+
+  app.innerHTML = `
+    <section class="card">
+      <div class="row">
+        <div>
+          <h2>Targeted Practice</h2>
+          <p class="small">Pick an exam, then a topic you missed often in that exam.</p>
+        </div>
+        <div style="text-align:right;">
+          <button class="btn-muted" id="backToResultPortalBtn">Back to Result Portal</button>
+          <button class="btn-muted" id="toWeakAreaBtn">Weak Area Analysis</button>
+          <button class="btn-muted" id="logoutBtn">Logout</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>Choose exam and topic</h3>
+      <div class="exam-tab-bar" id="practiceExamTabBar" role="tablist"></div>
+      <div id="practiceExamTabMeta" class="space-top small"></div>
+      <div class="space-top">
+        <label for="practiceTopicSelect">Topic (most wrong answers first in this exam)</label>
+        <select id="practiceTopicSelect"></select>
+      </div>
+      <button class="btn-primary space-top" id="loadPracticeBtn">Start Practice</button>
+    </section>
+
+    <section class="card">
+      <h3>Practice Questions</h3>
+      <div id="practiceQuestionsContainer">
+        <p class="small">Select exam tab, choose a topic, then Start Practice.</p>
+      </div>
+    </section>
+  `;
+
+  const practiceExamBar = document.getElementById("practiceExamTabBar");
+  const practiceMeta = document.getElementById("practiceExamTabMeta");
+  const topicSelect = document.getElementById("practiceTopicSelect");
+  const practiceContainer = document.getElementById("practiceQuestionsContainer");
+
+  function currentExam() {
+    return byExam[activeExamIdx] || null;
+  }
+
+  function fillTopicSelect() {
+    const ex = currentExam();
+    if (!ex || !ex.topics || !ex.topics.length) {
+      topicSelect.innerHTML = `<option value="">No topics for this exam</option>`;
+      return;
+    }
+    topicSelect.innerHTML = ex.topics
+      .map((t) => `<option value="${t.topic}">${t.topic} (${t.wrong_count} wrong)</option>`)
+      .join("");
+  }
+
+  function renderPracticeExamTabs() {
+    if (!byExam.length) {
+      practiceExamBar.innerHTML = "";
+      practiceMeta.textContent = "";
+      topicSelect.innerHTML = `<option value="">No exams with attempt data</option>`;
+      return;
+    }
+    if (activeExamIdx >= byExam.length) activeExamIdx = 0;
+    practiceExamBar.innerHTML = byExam
+      .map(
+        (ex, i) => `
+      <button type="button" class="exam-tab ${i === activeExamIdx ? "is-active" : ""}" data-index="${i}" role="tab">
+        ${ex.exam_title}
+      </button>
+    `
+      )
+      .join("");
+    const ex = currentExam();
+    practiceMeta.textContent = ex
+      ? `Topics are ordered by wrong-answer count for “${ex.exam_title}”.`
+      : "";
+    fillTopicSelect();
+    practiceExamBar.querySelectorAll(".exam-tab").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        activeExamIdx = Number(btn.dataset.index);
+        renderPracticeExamTabs();
+      });
+    });
+  }
+
+  renderPracticeExamTabs();
+
+  document.getElementById("backToResultPortalBtn").addEventListener("click", renderStudentResultPortal);
+  document.getElementById("toWeakAreaBtn").addEventListener("click", renderWeakAreaPortal);
+  document.getElementById("logoutBtn").addEventListener("click", clearSession);
+  document.getElementById("loadPracticeBtn").addEventListener("click", async () => {
+    const ex = currentExam();
+    const topic = topicSelect.value;
+    if (!ex || !topic) {
+      alert("Please select an exam tab and a topic.");
+      return;
+    }
+
+    let questions = [];
+    try {
+      const url = `${API_BASE}/results/student/${session.userId}/practice-topics/${encodeURIComponent(
+        topic
+      )}/questions?examId=${encodeURIComponent(ex.exam_id)}`;
+      const response = await fetch(url);
+      questions = await response.json();
+    } catch (_error) {
+      questions = [];
+    }
+
+    if (!questions.length) {
+      practiceContainer.innerHTML = `<p class="small">No practice questions found for “${topic}” in this exam.</p>`;
+      return;
+    }
+
+    practiceContainer.innerHTML = `
+      <div class="small">Exam: <strong>${ex.exam_title}</strong> · Topic: <strong>${topic}</strong> · Questions: ${questions.length}</div>
+      <div id="practiceQuestionList" class="space-top">
+        ${questions
+          .map(
+            (q, idx) => `
+            <div class="question-box">
+              <div><strong>Q${idx + 1}. ${q.question_text}</strong></div>
+              <label><input type="radio" name="pq${q.question_id}" value="1" /> ${q.option_1}</label>
+              <label><input type="radio" name="pq${q.question_id}" value="2" /> ${q.option_2}</label>
+              <label><input type="radio" name="pq${q.question_id}" value="3" /> ${q.option_3}</label>
+              <label><input type="radio" name="pq${q.question_id}" value="4" /> ${q.option_4}</label>
+            </div>
+          `
+          )
+          .join("")}
+      </div>
+      <button class="btn-primary" id="submitPracticeBtn">Submit Practice</button>
+      <div id="practiceResultBox" class="space-top"></div>
+    `;
+
+    document.getElementById("submitPracticeBtn").addEventListener("click", () => {
+      let correct = 0;
+      const wrongItems = [];
+      questions.forEach((q) => {
+        const selected = document.querySelector(`input[name="pq${q.question_id}"]:checked`);
+        const selectedValue = selected ? Number(selected.value) : 0;
+        if (selectedValue === Number(q.correct_answer)) {
+          correct += 1;
+        } else {
+          wrongItems.push({
+            question: q.question_text,
+            selected: selectedValue || "Not answered",
+            correct: q.correct_answer
+          });
+        }
+      });
+
+      const attempted = questions.length;
+      const score = attempted === 0 ? 0 : Number(((correct / attempted) * 100).toFixed(2));
+      const resultBox = document.getElementById("practiceResultBox");
+      resultBox.innerHTML = `
+        <div class="result-card">
+          <div class="small">Practice Score</div>
+          <strong>${correct}/${attempted} (${score}%)</strong>
+        </div>
+        ${
+          wrongItems.length
+            ? `<div class="space-top small"><strong>Review Incorrect Questions:</strong></div>
+               <ul class="small">${wrongItems
+                 .map((w) => `<li>${w.question} (Selected: ${w.selected}, Correct: ${w.correct})</li>`)
+                 .join("")}</ul>`
+            : `<p class="small text-success">Excellent! All answers are correct.</p>`
+        }
+      `;
+    });
+  });
+}
+
+async function renderMentorDashboard() {
+  const session = readSession();
+  app.className = "";
+
+  let students = [];
+  let recentAttempts = [];
+  try {
+    const response = await fetch(`${API_BASE}/mentor/${session.userId}/students-performance`);
+    const data = await response.json();
+    students = data.students || [];
+    recentAttempts = data.recentAttempts || [];
+  } catch (_error) {
+    students = [];
+    recentAttempts = [];
+  }
+
+  const studentCards = students.length
+    ? students
+        .map(
+          (s) => `
+        <div class="result-card">
+          <strong>${s.first_name} ${s.last_name}</strong>
+          <div class="small">Enrollment: ${s.enrollment_no}</div>
+          <div class="small">Attempts: ${s.attempts_count}</div>
+          <div class="small">Average: ${s.average_percentage === null ? "N/A" : `${s.average_percentage}%`}</div>
+          <div class="small">Latest Attempt: ${s.latest_attempt ? formatDateTime(s.latest_attempt) : "No attempts yet"}</div>
+        </div>
+      `
+        )
+        .join("")
+    : `<p class="small">No students are assigned to you yet.</p>`;
+
+  const recentList = recentAttempts.length
+    ? recentAttempts
+        .map(
+          (item) => `
+        <div class="question-box">
+          <strong>${item.student_name}</strong>
+          <div class="small">Exam: ${item.exam_title}</div>
+          <div class="small">Score: ${item.score_obtained}% (${item.status})</div>
+          <div class="small">Attempted On: ${formatDateTime(item.attempt_date)}</div>
+        </div>
+      `
+        )
+        .join("")
+    : `<p class="small">No recent attempts from assigned students.</p>`;
+
+  app.innerHTML = `
+    <section class="card">
+      <div class="row">
+        <div>
+          <h2>Mentor Dashboard</h2>
+          <p class="small">Welcome, ${session.displayName}</p>
+        </div>
+        <div style="text-align:right;">
+          <button class="btn-muted" id="logoutBtn">Logout</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>Assigned Students Overview</h3>
+      <div class="result-grid">${studentCards}</div>
+    </section>
+
+    <section class="card">
+      <h3>Recent Performance Activity</h3>
+      ${recentList}
+    </section>
+  `;
+
+  document.getElementById("logoutBtn").addEventListener("click", clearSession);
 }
 
 async function renderExamAttempt(examId) {
@@ -544,7 +1264,7 @@ async function renderExamAttempt(examId) {
       .then(({ ok, data }) => {
         if (!ok) throw new Error(data.message || "Submission failed.");
         alert(
-          `Exam submitted.\nScore: ${data.rawScore}/${data.totalMarks}\nPercentage: ${data.percentage}%\nStatus: ${data.status}`
+          `Exam submitted.\nAttempt #${data.attemptNumber}\nScore: ${data.rawScore}/${data.totalMarks}\nPercentage: ${data.percentage}%\nStatus: ${data.status}`
         );
         renderStudentDashboard();
       })
@@ -561,6 +1281,8 @@ function render() {
 
   if (session.role === "admin") {
     renderAdminDashboard();
+  } else if (session.role === "mentor") {
+    renderMentorDashboard();
   } else {
     renderStudentDashboard();
   }

@@ -10,6 +10,11 @@ This project now includes a complete **Node + Express + MySQL** implementation a
 - `app.js` + `index.html` + `styles.css` -> frontend portal
 - `python_connector.py` -> CLI connector menu (Login, Take Exam, View Result)
 
+User roles currently supported in web app:
+- Admin
+- Student
+- Mentor
+
 ## 1) MySQL setup
 
 Run these files in order:
@@ -21,6 +26,7 @@ Run these files in order:
 
 This creates:
 - 5 users (2 admins, 3 students)
+- 1 mentor
 - 2 exams
 - 20 questions
 - 10 past attempts

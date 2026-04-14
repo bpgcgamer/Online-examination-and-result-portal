@@ -4,13 +4,21 @@ INSERT INTO admin (username, password, full_name) VALUES
 ('admin1', 'admin123', 'Ananya Sharma'),
 ('admin2', 'admin123', 'Ravi Verma');
 
+INSERT INTO mentor (username, password, full_name) VALUES
+('mentor1', 'mentor123', 'Neha Kapoor');
+
 CALL Add_Student('aarav.shah@example.com', 'stud123', 'Aarav', 'Shah', 'ENR001');
 CALL Add_Student('diya.mehta@example.com', 'stud123', 'Diya', 'Mehta', 'ENR002');
 CALL Add_Student('kabir.nanda@example.com', 'stud123', 'Kabir', 'Nanda', 'ENR003');
 
+INSERT INTO mentor_student_map (mentor_id, student_id) VALUES
+(1, 1),
+(1, 2),
+(1, 3);
+
 INSERT INTO exam (exam_code, title, duration_minutes, total_marks, pass_mark, created_by_admin_id) VALUES
-('DBMS-MID-01', 'DBMS Midterm', 60, 100, 40, 1),
-('SQL-FIN-01', 'SQL Final', 75, 100, 50, 2);
+('DBMS-MID-01', 'DBMS Midterm', 60, 50, 40, 1),
+('SQL-FIN-01', 'SQL Final', 75, 50, 50, 2);
 
 INSERT INTO question (exam_id, question_text, option_1, option_2, option_3, option_4, correct_answer, marks_allocated) VALUES
 (1, 'What does DBMS stand for?', 'Data Backup Management System', 'Database Management System', 'Digital Base Monitoring Software', 'Data Batch Management Setup', 2, 5),
@@ -35,17 +43,22 @@ INSERT INTO question (exam_id, question_text, option_1, option_2, option_3, opti
 (2, 'Which command adds new records?', 'SELECT', 'INSERT', 'ALTER', 'CREATE', 2, 5),
 (2, 'Which clause sorts results?', 'WHERE', 'ORDER BY', 'HAVING', 'GROUP BY', 2, 5);
 
-INSERT INTO result (student_id, exam_id, raw_score, total_marks_snapshot, score_obtained, status, attempt_date) VALUES
-(1, 1, 35, 100, 35.00, 'Fail', '2026-03-10 10:10:00'),
-(1, 2, 62, 100, 62.00, 'Pass', '2026-03-11 11:00:00'),
-(2, 1, 48, 100, 48.00, 'Pass', '2026-03-12 09:15:00'),
-(2, 2, 77, 100, 77.00, 'Pass', '2026-03-13 14:20:00'),
-(3, 1, 39, 100, 39.00, 'Fail', '2026-03-14 16:25:00'),
-(3, 2, 58, 100, 58.00, 'Pass', '2026-03-15 12:05:00'),
-(1, 1, 41, 100, 41.00, 'Pass', '2026-03-16 10:45:00'),
-(2, 1, 65, 100, 65.00, 'Pass', '2026-03-17 08:35:00'),
-(3, 2, 49, 100, 49.00, 'Fail', '2026-03-18 13:00:00'),
-(1, 2, 85, 100, 85.00, 'Pass', '2026-03-19 15:40:00');
+INSERT INTO result (student_id, exam_id, attempt_number, raw_score, total_marks_snapshot, score_obtained, is_best_score, status, attempt_date) VALUES
+-- DBMS Exam (total_marks = 50, 10 questions x 5 marks each)
+(1, 1, 1, 35, 50, 70.00, 0, 'Pass', '2026-03-10 10:10:00'),
+(1, 1, 2, 40, 50, 80.00, 1, 'Pass', '2026-03-16 10:45:00'),
+-- SQL Exam (total_marks = 50, 10 questions x 5 marks each)
+(1, 2, 1, 30, 50, 60.00, 0, 'Pass', '2026-03-11 11:00:00'),
+(1, 2, 2, 40, 50, 80.00, 1, 'Pass', '2026-03-19 15:40:00'),
+-- Student 2
+(2, 1, 1, 25, 50, 50.00, 0, 'Pass', '2026-03-12 09:15:00'),
+(2, 1, 2, 35, 50, 70.00, 1, 'Pass', '2026-03-17 08:35:00'),
+(2, 2, 1, 35, 50, 70.00, 0, 'Pass', '2026-03-13 14:20:00'),
+(2, 2, 2, 45, 50, 90.00, 1, 'Pass', '2026-03-20 10:30:00'),
+-- Student 3
+(3, 1, 1, 20, 50, 40.00, 1, 'Pass', '2026-03-14 16:25:00'),
+(3, 2, 1, 25, 50, 50.00, 1, 'Pass', '2026-03-15 12:05:00'),
+(3, 2, 2, 20, 50, 40.00, 0, 'Fail', '2026-03-18 13:00:00');
 
 -- Constraint test (run separately to demonstrate failure):
 -- This should fail because CHECK(score_obtained <= 100)

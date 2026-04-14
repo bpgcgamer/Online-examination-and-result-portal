@@ -179,6 +179,47 @@ button {
   background: #fcfcff;
 }
 
+.result-portal-card {
+  padding: 18px;
+}
+
+.portal-mini-stats .result-card {
+  min-height: 74px;
+}
+
+.trend-wrap {
+  margin: 12px 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.trend-chart {
+  width: 100%;
+  height: 220px;
+  display: block;
+}
+
+.subject-bar-chart {
+  width: 100%;
+  height: 260px;
+  display: block;
+}
+
+.attempt-list {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.attempt-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fcfcff;
+}
+
 .text-danger {
   color: var(--danger);
 }
@@ -197,4 +238,47 @@ button {
 .auth-card {
   width: 100%;
   max-width: 700px;
+}
+
+.exam-tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 16px 0;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+
+.exam-tab {
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f7f8ff;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.exam-tab:hover {
+  border-color: var(--primary);
+}
+
+.exam-tab.is-active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+.exam-tab-panel {
+  min-height: 48px;
+}
+
+.weak-topic-list {
+  margin: 12px 0 0 1.1rem;
+  padding: 0;
+}
+
+.weak-topic-list li {
+  margin-bottom: 8px;
+  line-height: 1.45;
 }
