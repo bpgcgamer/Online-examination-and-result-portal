@@ -8,6 +8,224 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(__dirname));
 
+let cachedGeminiEndpoint = null;
+
+function extractAttemptNumberFromText(text) {
+  const normalized = String(text || "").toLowerCase();
+  const directMatch = normalized.match(/attempt\s*#?\s*(\d+)/i);
+  if (directMatch) return Number(directMatch[1]);
+
+  const ordinalBeforeAttempt = normalized.match(/(\d+)\s*(st|nd|rd|th)\s*attempt/i);
+  if (ordinalBeforeAttempt) return Number(ordinalBeforeAttempt[1]);
+
+  const wordToNum = {
+    first: 1,
+    second: 2,
+    third: 3,
+    fourth: 4,
+    fifth: 5,
+    sixth: 6,
+    seventh: 7,
+    eighth: 8,
+    ninth: 9,
+    tenth: 10
+  };
+  const wordMatch = normalized.match(
+    /\b(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\s*attempt\b/i
+  );
+  if (wordMatch) return wordToNum[wordMatch[1].toLowerCase()] || null;
+
+  return null;
+}
+
+async function resolveGeminiEndpoint(apiKey) {
+  if (cachedGeminiEndpoint) return cachedGeminiEndpoint;
+
+  if (process.env.GEMINI_API_URL) {
+    cachedGeminiEndpoint = process.env.GEMINI_API_URL;
+    return cachedGeminiEndpoint;
+  }
+
+  const preferredModels = [
+    process.env.GEMINI_MODEL,
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-1.5-pro"
+  ].filter(Boolean);
+
+  const base = "https://generativelanguage.googleapis.com";
+  const versions = ["v1beta", "v1"];
+  for (const version of versions) {
+    try {
+      const listRes = await fetch(`${base}/${version}/models?key=${encodeURIComponent(apiKey)}`);
+      if (!listRes.ok) continue;
+      const listData = await listRes.json();
+      const models = Array.isArray(listData.models) ? listData.models : [];
+
+      const supportsGenerate = models.filter((m) =>
+        Array.isArray(m.supportedGenerationMethods) &&
+        m.supportedGenerationMethods.includes("generateContent")
+      );
+
+      const modelByName = new Map(
+        supportsGenerate
+          .map((m) => {
+            const name = String(m.name || "");
+            const shortName = name.startsWith("models/") ? name.slice("models/".length) : name;
+            return [shortName, shortName];
+          })
+          .filter((x) => x[0])
+      );
+
+      const picked =
+        preferredModels.find((m) => modelByName.has(m)) ||
+        (supportsGenerate[0]
+          ? String(supportsGenerate[0].name || "").replace(/^models\//, "")
+          : null);
+
+      if (picked) {
+        cachedGeminiEndpoint = `${base}/${version}/models/${encodeURIComponent(picked)}:generateContent`;
+        return cachedGeminiEndpoint;
+      }
+    } catch (_error) {
+      // try next version
+    }
+  }
+
+  throw new Error(
+    "Could not find any Gemini model with generateContent support for this API key. Set GEMINI_API_URL manually."
+  );
+}
+
+async function generateChatbotReplyWithGemini({
+  message,
+  weakTopicRows,
+  scored,
+  recentHistory,
+  wrongAnswerContext
+}) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+
+  const weakTopicContext = weakTopicRows.length
+    ? weakTopicRows.map((w) => `${w.topic} (${Number(w.wrong_count)} wrong)`).join(", ")
+    : "No weak-topic data yet.";
+
+  const contextQuestions = scored.length
+    ? scored
+        .map(
+          (q, idx) =>
+            `${idx + 1}. Exam: ${q.exam_title} | Topic: ${q.topic || "General"}\nQuestion: ${q.question_text}\nCorrect option: ${
+              q.correct_answer
+            }\nExplanation: ${
+              q.explanation || "No explanation available."
+            }`
+        )
+        .join("\n\n")
+    : "No closely matching question context found.";
+
+  const historyContext =
+    recentHistory && recentHistory.length
+      ? recentHistory
+          .map((h, idx) => `Recent ${idx + 1}:\nStudent: ${h.query_text}\nTutor: ${h.response_text}`)
+          .join("\n\n")
+      : "No prior chat history.";
+
+  const prompt = `You are a helpful general AI assistant.
+Student doubt: "${message}"
+
+Student weak topics: ${weakTopicContext}
+
+Recent chat history:
+${historyContext}
+
+Relevant question/explanation context:
+${contextQuestions}
+
+Student attempt/wrong-answer context:
+${wrongAnswerContext || "No explicit attempt context was found from exam results."}
+
+Instructions:
+- Give a high-quality, complete answer (8-16 lines) in plain English.
+- Structure: Concept -> Why it matters -> Simple example.
+- If SQL is involved, include one short SQL snippet.
+- If student confusion is obvious, contrast common mistakes.
+- If the user asks about wrong answers, explicitly reference the available wrong-answer context.
+- If the question is non-DBMS (e.g., math, general knowledge, coding), answer it normally as a general assistant.
+- End with one suggested next practice action.`;
+
+  const endpoint = await resolveGeminiEndpoint(apiKey);
+
+  async function callGemini(maxOutputTokens, temperature) {
+    const response = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature,
+          maxOutputTokens
+        }
+      })
+    });
+    if (!response.ok) {
+      const errText = await response.text();
+      const error = new Error(`Gemini API request failed with status ${response.status}: ${errText}`);
+      error.status = response.status;
+      throw error;
+    }
+    return response.json();
+  }
+
+  let data;
+  try {
+    data = await callGemini(1800, 0.35);
+  } catch (error) {
+    // One retry for transient load/rate-limit style failures.
+    if (error.status === 429 || error.status === 503) {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      data = await callGemini(1400, 0.3);
+    } else {
+      throw error;
+    }
+  }
+
+  const finishReason = data?.candidates?.[0]?.finishReason || "";
+  const parts = data?.candidates?.[0]?.content?.parts || [];
+  const joined = parts
+    .map((p) => (typeof p?.text === "string" ? p.text : ""))
+    .join("")
+    .trim();
+
+  // If model reports token cutoff, ask for continuation once.
+  if (joined && finishReason === "MAX_TOKENS") {
+    const continuationPrompt = `${prompt}\n\nYour previous response was cut off. Continue from where you stopped and complete it cleanly without repeating from the beginning.`;
+    const response2 = await fetch(`${endpoint}?key=${encodeURIComponent(apiKey)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: continuationPrompt }] }],
+        generationConfig: {
+          temperature: 0.3,
+          maxOutputTokens: 1200
+        }
+      })
+    });
+    if (response2.ok) {
+      const data2 = await response2.json();
+      const parts2 = data2?.candidates?.[0]?.content?.parts || [];
+      const joined2 = parts2
+        .map((p) => (typeof p?.text === "string" ? p.text : ""))
+        .join("")
+        .trim();
+      return joined2 ? `${joined}\n\n${joined2}` : joined;
+    }
+  }
+
+  return joined || null;
+}
+
 async function ensureSupportTables() {
   const [attemptNumberCol] = await pool.query(
     `SELECT 1
@@ -96,6 +314,59 @@ async function ensureSupportTables() {
        ADD COLUMN topic VARCHAR(100) NOT NULL DEFAULT 'General'`
     );
   }
+
+  const [explanationCol] = await pool.query(
+    `SELECT 1
+     FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = 'question'
+       AND COLUMN_NAME = 'explanation'
+     LIMIT 1`
+  );
+  if (!explanationCol.length) {
+    await pool.query(
+      `ALTER TABLE question
+       ADD COLUMN explanation TEXT NULL`
+    );
+  }
+
+  await pool.query(
+    `CREATE TABLE IF NOT EXISTS practice_attempt (
+      practice_attempt_id INT AUTO_INCREMENT PRIMARY KEY,
+      student_id INT NOT NULL,
+      exam_id INT NULL,
+      topic VARCHAR(100) NOT NULL,
+      total_questions INT NOT NULL,
+      correct_answers INT NOT NULL,
+      score_percent DECIMAL(5,2) NOT NULL,
+      attempted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_practice_attempt_student FOREIGN KEY (student_id) REFERENCES student(student_id) ON DELETE CASCADE,
+      CONSTRAINT fk_practice_attempt_exam FOREIGN KEY (exam_id) REFERENCES exam(exam_id) ON DELETE SET NULL
+    )`
+  );
+
+  await pool.query(
+    `CREATE TABLE IF NOT EXISTS practice_attempt_answer (
+      practice_attempt_answer_id INT AUTO_INCREMENT PRIMARY KEY,
+      practice_attempt_id INT NOT NULL,
+      question_id INT NOT NULL,
+      selected_option TINYINT NOT NULL CHECK (selected_option BETWEEN 0 AND 4),
+      is_correct BOOLEAN NOT NULL DEFAULT FALSE,
+      CONSTRAINT fk_practice_answer_attempt FOREIGN KEY (practice_attempt_id) REFERENCES practice_attempt(practice_attempt_id) ON DELETE CASCADE,
+      CONSTRAINT fk_practice_answer_question FOREIGN KEY (question_id) REFERENCES question(question_id) ON DELETE CASCADE
+    )`
+  );
+
+  await pool.query(
+    `CREATE TABLE IF NOT EXISTS doubt_log (
+      doubt_id INT AUTO_INCREMENT PRIMARY KEY,
+      student_id INT NOT NULL,
+      query_text TEXT NOT NULL,
+      response_text TEXT NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT fk_doubt_log_student FOREIGN KEY (student_id) REFERENCES student(student_id) ON DELETE CASCADE
+    )`
+  );
 
   await pool.query(
     `UPDATE question q
@@ -348,8 +619,8 @@ app.post("/api/exams", async (req, res) => {
     for (const q of questions) {
       await conn.query(
         `INSERT INTO question
-         (exam_id, question_text, option_1, option_2, option_3, option_4, correct_answer, marks_allocated, topic)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (exam_id, question_text, option_1, option_2, option_3, option_4, correct_answer, marks_allocated, topic, explanation)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           examId,
           q.questionText,
@@ -359,7 +630,8 @@ app.post("/api/exams", async (req, res) => {
           q.option4,
           Number(q.correctAnswer),
           Number(q.marksAllocated),
-          (q.topic || "General").trim()
+          (q.topic || "General").trim(),
+          (q.explanation || "").trim()
         ]
       );
     }
@@ -392,16 +664,25 @@ app.post("/api/exams/:examId/submit", async (req, res) => {
     const exam = examRows[0];
 
     const [qRows] = await conn.query(
-      "SELECT question_id, correct_answer, marks_allocated FROM question WHERE exam_id = ?",
+      "SELECT question_id, question_text, correct_answer, marks_allocated, explanation FROM question WHERE exam_id = ?",
       [examId]
     );
 
     const answerMap = new Map(answers.map((a) => [Number(a.questionId), Number(a.selectedOption)]));
     let rawScore = 0;
+    const wrongAnswers = [];
     for (const q of qRows) {
       const chosen = answerMap.get(Number(q.question_id));
       if (chosen && chosen === Number(q.correct_answer)) {
         rawScore += Number(q.marks_allocated);
+      } else {
+        wrongAnswers.push({
+          questionId: Number(q.question_id),
+          questionText: q.question_text,
+          selectedOption: chosen || 0,
+          correctAnswer: Number(q.correct_answer),
+          explanation: q.explanation || "No explanation available for this question."
+        });
       }
     }
     const totalMarks = qRows.reduce((sum, q) => sum + Number(q.marks_allocated), 0);
@@ -455,7 +736,8 @@ app.post("/api/exams/:examId/submit", async (req, res) => {
       percentage,
       status,
       attemptNumber: nextAttemptNumber,
-      isBestScore: shouldBeBest
+      isBestScore: shouldBeBest,
+      wrongAnswers
     });
   } catch (error) {
     await conn.rollback();
@@ -576,6 +858,152 @@ app.get("/api/report/topper", async (_req, res) => {
        LIMIT 1`
     );
     res.json(rows[0] || null);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+app.get("/api/leaderboard/overall", async (_req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT
+         s.student_id,
+         CONCAT(s.first_name, ' ', s.last_name) AS student_name,
+         ROUND(AVG(r.score_obtained), 2) AS average_score,
+         ROUND(MAX(r.score_obtained), 2) AS best_score,
+         COUNT(r.result_id) AS attempts_count
+       FROM student s
+       JOIN result r ON r.student_id = s.student_id
+       GROUP BY s.student_id, s.first_name, s.last_name
+       ORDER BY AVG(r.score_obtained) DESC, MAX(r.score_obtained) DESC, COUNT(r.result_id) DESC, student_name ASC
+       LIMIT 50`
+    );
+    let rank = 0;
+    let prevKey = null;
+    const normalized = rows.map((row, idx) => {
+      const key = `${Number(row.average_score)}|${Number(row.best_score)}|${Number(row.attempts_count)}`;
+      if (key !== prevKey) {
+        rank = idx + 1;
+        prevKey = key;
+      }
+      return {
+        student_id: Number(row.student_id),
+        student_name: row.student_name,
+        average_score: Number(row.average_score),
+        best_score: Number(row.best_score),
+        attempts_count: Number(row.attempts_count),
+        rank
+      };
+    });
+    res.json(normalized);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+app.get("/api/leaderboard/exam/:examId", async (req, res) => {
+  const { examId } = req.params;
+  try {
+    const [rows] = await pool.query(
+      `SELECT
+         e.exam_id,
+         e.title AS exam_title,
+         s.student_id,
+         CONCAT(s.first_name, ' ', s.last_name) AS student_name,
+         MAX(r.score_obtained) AS best_score,
+         SUBSTRING_INDEX(
+           GROUP_CONCAT(r.score_obtained ORDER BY r.attempt_number DESC),
+           ',',
+           1
+         ) AS latest_score,
+         COUNT(r.result_id) AS attempts_count
+       FROM result r
+       JOIN exam e ON e.exam_id = r.exam_id
+       JOIN student s ON s.student_id = r.student_id
+       WHERE r.exam_id = ?
+       GROUP BY e.exam_id, e.title, s.student_id, s.first_name, s.last_name
+       ORDER BY MAX(r.score_obtained) DESC, COUNT(r.result_id) DESC, student_name ASC
+       LIMIT 50`,
+      [examId]
+    );
+    let rank = 0;
+    let prevKey = null;
+    const normalized = rows.map((row, idx) => {
+      const key = `${Number(row.best_score)}|${Number(row.attempts_count)}`;
+      if (key !== prevKey) {
+        rank = idx + 1;
+        prevKey = key;
+      }
+      return {
+        exam_id: Number(row.exam_id),
+        exam_title: row.exam_title,
+        student_id: Number(row.student_id),
+        student_name: row.student_name,
+        best_score: Number(row.best_score),
+        latest_score: Number(row.latest_score),
+        attempts_count: Number(row.attempts_count),
+        rank
+      };
+    });
+    res.json(normalized);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+app.get("/api/admin/:adminId/students-performance-list", async (req, res) => {
+  const { adminId } = req.params;
+  try {
+    const [rows] = await pool.query(
+      `SELECT DISTINCT s.student_id, CONCAT(s.first_name, ' ', s.last_name) AS student_name, s.enrollment_no
+       FROM result r
+       JOIN exam e ON e.exam_id = r.exam_id
+       JOIN student s ON s.student_id = r.student_id
+       WHERE e.created_by_admin_id = ?
+       ORDER BY student_name`,
+      [adminId]
+    );
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+app.get("/api/admin/:adminId/students/:studentId/performance", async (req, res) => {
+  const { adminId, studentId } = req.params;
+  try {
+    const [rows] = await pool.query(
+      `SELECT
+         e.exam_id,
+         e.title AS exam_title,
+         e.exam_code,
+         r.attempt_number,
+         r.raw_score,
+         r.total_marks_snapshot,
+         r.score_obtained,
+         r.status,
+         r.attempt_date,
+         r.is_best_score
+       FROM result r
+       JOIN exam e ON e.exam_id = r.exam_id
+       WHERE e.created_by_admin_id = ? AND r.student_id = ?
+       ORDER BY e.title, r.attempt_number`,
+      [adminId, studentId]
+    );
+    res.json(
+      rows.map((row) => ({
+        exam_id: Number(row.exam_id),
+        exam_title: row.exam_title,
+        exam_code: row.exam_code,
+        attempt_number: Number(row.attempt_number),
+        raw_score: Number(row.raw_score),
+        total_marks_snapshot: Number(row.total_marks_snapshot),
+        score_obtained: Number(row.score_obtained),
+        status: row.status,
+        attempt_date: row.attempt_date,
+        is_best_score: Number(row.is_best_score)
+      }))
+    );
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -805,6 +1233,7 @@ app.get("/api/results/student/:studentId/practice-topics/:topic/questions", asyn
          q.correct_answer,
          q.marks_allocated,
          q.topic,
+         q.explanation,
          e.title AS exam_title,
          SUM(CASE WHEN r.student_id = ? AND aa.is_correct = 0 THEN 1 ELSE 0 END) AS wrong_count_for_student
        FROM question q
@@ -831,10 +1260,378 @@ app.get("/api/results/student/:studentId/practice-topics/:topic/questions", asyn
         correct_answer: Number(row.correct_answer),
         marks_allocated: Number(row.marks_allocated),
         topic: row.topic || "General",
+        explanation: row.explanation || "",
         exam_title: row.exam_title,
         wrong_count_for_student: Number(row.wrong_count_for_student)
       }))
     );
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+app.post("/api/practice/submit", async (req, res) => {
+  const { studentId, examId, topic, answers } = req.body;
+  if (!studentId || !topic || !Array.isArray(answers) || !answers.length) {
+    return res.status(400).json({ message: "studentId, topic, and answers are required." });
+  }
+
+  const questionIds = answers.map((a) => Number(a.questionId)).filter((id) => !Number.isNaN(id));
+  if (!questionIds.length) {
+    return res.status(400).json({ message: "No valid questions submitted." });
+  }
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const [qRows] = await conn.query(
+      `SELECT question_id, question_text, correct_answer, explanation
+       FROM question
+       WHERE question_id IN (?)`,
+      [questionIds]
+    );
+
+    const questionMap = new Map(qRows.map((q) => [Number(q.question_id), q]));
+    const evaluated = answers
+      .map((a) => {
+        const q = questionMap.get(Number(a.questionId));
+        if (!q) return null;
+        const selectedOption = Number(a.selectedOption) || 0;
+        const isCorrect = selectedOption === Number(q.correct_answer);
+        return {
+          questionId: Number(q.question_id),
+          questionText: q.question_text,
+          selectedOption,
+          correctAnswer: Number(q.correct_answer),
+          explanation: q.explanation || "No explanation available for this question.",
+          isCorrect
+        };
+      })
+      .filter(Boolean);
+
+    const totalQuestions = evaluated.length;
+    const correctAnswers = evaluated.filter((e) => e.isCorrect).length;
+    const scorePercent =
+      totalQuestions === 0 ? 0 : Number(((correctAnswers / totalQuestions) * 100).toFixed(2));
+
+    const [attemptInsert] = await conn.query(
+      `INSERT INTO practice_attempt
+       (student_id, exam_id, topic, total_questions, correct_answers, score_percent, attempted_at)
+       VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      [studentId, examId || null, topic, totalQuestions, correctAnswers, scorePercent]
+    );
+    const practiceAttemptId = attemptInsert.insertId;
+
+    for (const item of evaluated) {
+      await conn.query(
+        `INSERT INTO practice_attempt_answer
+         (practice_attempt_id, question_id, selected_option, is_correct)
+         VALUES (?, ?, ?, ?)`,
+        [practiceAttemptId, item.questionId, item.selectedOption, item.isCorrect ? 1 : 0]
+      );
+    }
+
+    await conn.commit();
+    return res.json({
+      practiceAttemptId,
+      totalQuestions,
+      correctAnswers,
+      scorePercent,
+      wrongAnswers: evaluated
+        .filter((e) => !e.isCorrect)
+        .map((e) => ({
+          questionId: e.questionId,
+          questionText: e.questionText,
+          selectedOption: e.selectedOption,
+          correctAnswer: e.correctAnswer,
+          explanation: e.explanation
+        }))
+    });
+  } catch (error) {
+    await conn.rollback();
+    return res.status(500).json({ message: error.message });
+  } finally {
+    conn.release();
+  }
+});
+
+app.get("/api/chatbot/history/:studentId", async (req, res) => {
+  const { studentId } = req.params;
+  try {
+    const [rows] = await pool.query(
+      `SELECT doubt_id, query_text, response_text, created_at
+       FROM doubt_log
+       WHERE student_id = ?
+       ORDER BY created_at DESC
+       LIMIT 20`,
+      [studentId]
+    );
+    res.json(
+      rows.map((row) => ({
+        doubt_id: Number(row.doubt_id),
+        query_text: row.query_text,
+        response_text: row.response_text,
+        created_at: row.created_at
+      }))
+    );
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+app.post("/api/chatbot/ask", async (req, res) => {
+  const { studentId, message } = req.body;
+  if (!studentId || !message || !String(message).trim()) {
+    return res.status(400).json({ message: "studentId and message are required." });
+  }
+
+  try {
+    const input = String(message).trim();
+    const normalized = input.toLowerCase();
+    const tokens = Array.from(
+      new Set(
+        normalized
+          .split(/[^a-z0-9]+/g)
+          .map((t) => t.trim())
+          .filter((t) => t.length >= 3)
+      )
+    ).slice(0, 8);
+
+    const [weakTopicRows] = await pool.query(
+      `SELECT q.topic, SUM(CASE WHEN aa.is_correct = 0 THEN 1 ELSE 0 END) AS wrong_count
+       FROM result r
+       JOIN attempt_answer aa ON aa.result_id = r.result_id
+       JOIN question q ON q.question_id = aa.question_id
+       WHERE r.student_id = ?
+       GROUP BY q.topic
+       HAVING wrong_count > 0
+       ORDER BY wrong_count DESC, q.topic
+       LIMIT 3`,
+      [studentId]
+    );
+
+    const [studentExamRows] = await pool.query(
+      `SELECT DISTINCT e.exam_id, e.title
+       FROM result r
+       JOIN exam e ON e.exam_id = r.exam_id
+       WHERE r.student_id = ?
+       ORDER BY e.title`,
+      [studentId]
+    );
+
+    const wantsWrongBreakdown =
+      /(wrong|incorrect).*(answer|question)/i.test(normalized) ||
+      /(explain|breakdown).*(wrong|incorrect)/i.test(normalized);
+    const attemptNumber = extractAttemptNumberFromText(normalized);
+
+    const matchingExam =
+      studentExamRows.find((e) => normalized.includes(String(e.title).toLowerCase())) ||
+      studentExamRows.find((e) =>
+        String(e.title)
+          .toLowerCase()
+          .split(/[^a-z0-9]+/g)
+          .some((w) => w.length >= 3 && normalized.includes(w))
+      ) ||
+      null;
+
+    let wrongAnswerContext = "";
+
+    // Deterministic resolver for attempt-specific wrong-answer explanations.
+    if (wantsWrongBreakdown && attemptNumber) {
+      const examForAttempt =
+        studentExamRows.find((e) => normalized.includes(String(e.title).toLowerCase())) ||
+        studentExamRows.find((e) =>
+          String(e.title)
+            .toLowerCase()
+            .split(/[^a-z0-9]+/g)
+            .some((w) => w.length >= 3 && normalized.includes(w))
+        ) ||
+        null;
+
+      let wrongRows = [];
+      if (examForAttempt) {
+        const [rows] = await pool.query(
+          `SELECT e.title AS exam_title, r.attempt_number,
+                  q.question_text, aa.selected_option, q.correct_answer, q.explanation
+           FROM result r
+           JOIN exam e ON e.exam_id = r.exam_id
+           JOIN attempt_answer aa ON aa.result_id = r.result_id
+           JOIN question q ON q.question_id = aa.question_id
+           WHERE r.student_id = ? AND r.attempt_number = ? AND r.exam_id = ? AND aa.is_correct = 0
+           ORDER BY q.question_id`,
+          [studentId, attemptNumber, examForAttempt.exam_id]
+        );
+        wrongRows = rows;
+      } else {
+        const [rows] = await pool.query(
+          `SELECT e.title AS exam_title, r.attempt_number,
+                  q.question_text, aa.selected_option, q.correct_answer, q.explanation
+           FROM result r
+           JOIN exam e ON e.exam_id = r.exam_id
+           JOIN attempt_answer aa ON aa.result_id = r.result_id
+           JOIN question q ON q.question_id = aa.question_id
+           WHERE r.student_id = ? AND r.attempt_number = ? AND aa.is_correct = 0
+           ORDER BY e.title, q.question_id`,
+          [studentId, attemptNumber]
+        );
+        wrongRows = rows;
+      }
+
+      if (wrongRows.length) {
+        const examTitle = wrongRows[0].exam_title;
+        const responseText = [
+          `Detailed wrong-answer breakdown for ${examTitle}, attempt #${attemptNumber}:`,
+          "",
+          ...wrongRows.map(
+            (row, idx) =>
+              `${idx + 1}) ${row.question_text}\n   Selected: ${
+                row.selected_option || "Not answered"
+              }, Correct: ${row.correct_answer}\n   Explanation: ${
+                row.explanation || "No explanation available for this question."
+              }`
+          ),
+          "",
+          "Next step: practice the same exam topic(s) in Targeted Practice and reattempt."
+        ].join("\n");
+
+        await pool.query(
+          `INSERT INTO doubt_log (student_id, query_text, response_text)
+           VALUES (?, ?, ?)`,
+          [studentId, input, responseText]
+        );
+
+        return res.json({ response: responseText, mode: "fallback", llmError: null });
+      }
+    }
+
+    // Build DB context for Gemini when user asks exam/wrong-answer questions without explicit attempt.
+    if (wantsWrongBreakdown) {
+      let contextRows = [];
+      if (matchingExam) {
+        const [rows] = await pool.query(
+          `SELECT e.title AS exam_title, r.attempt_number, q.question_text, aa.selected_option, q.correct_answer, q.explanation
+           FROM result r
+           JOIN exam e ON e.exam_id = r.exam_id
+           JOIN attempt_answer aa ON aa.result_id = r.result_id
+           JOIN question q ON q.question_id = aa.question_id
+           WHERE r.student_id = ? AND r.exam_id = ? AND aa.is_correct = 0
+           ORDER BY r.attempt_number DESC, q.question_id
+           LIMIT 12`,
+          [studentId, matchingExam.exam_id]
+        );
+        contextRows = rows;
+      } else {
+        const [rows] = await pool.query(
+          `SELECT e.title AS exam_title, r.attempt_number, q.question_text, aa.selected_option, q.correct_answer, q.explanation
+           FROM result r
+           JOIN exam e ON e.exam_id = r.exam_id
+           JOIN attempt_answer aa ON aa.result_id = r.result_id
+           JOIN question q ON q.question_id = aa.question_id
+           WHERE r.student_id = ? AND aa.is_correct = 0
+           ORDER BY r.attempt_number DESC, q.question_id
+           LIMIT 12`,
+          [studentId]
+        );
+        contextRows = rows;
+      }
+
+      wrongAnswerContext = contextRows.length
+        ? contextRows
+            .map(
+              (r, idx) =>
+                `${idx + 1}. [${r.exam_title} A${r.attempt_number}] ${r.question_text}\nSelected: ${
+                  r.selected_option || "Not answered"
+                }, Correct: ${r.correct_answer}\nExplanation: ${
+                  r.explanation || "No explanation available."
+                }`
+            )
+            .join("\n\n")
+        : "No wrong-answer rows found for this request.";
+    }
+
+    const [questionRows] = await pool.query(
+      `SELECT q.question_id, q.question_text, q.topic, q.correct_answer, q.explanation, e.title AS exam_title
+       FROM question q
+       JOIN exam e ON e.exam_id = q.exam_id
+       LIMIT 500`
+    );
+    const [historyRows] = await pool.query(
+      `SELECT query_text, response_text
+       FROM doubt_log
+       WHERE student_id = ?
+       ORDER BY created_at DESC
+       LIMIT 3`,
+      [studentId]
+    );
+
+    const scored = questionRows
+      .map((q) => {
+        const hay = `${q.question_text} ${q.topic || ""} ${q.explanation || ""}`.toLowerCase();
+        const score = tokens.reduce((sum, token) => sum + (hay.includes(token) ? 1 : 0), 0);
+        return { ...q, score };
+      })
+      .filter((q) => q.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3);
+
+    let responseText = "";
+    let mode = "fallback";
+    let llmError = null;
+    if (/(hello|hi|hey|start)/i.test(input) && tokens.length <= 2) {
+      responseText =
+        "Hi! I can help with general questions as well as your exam analytics (wrong answers, weak topics, and practice suggestions). Ask me anything.";
+    } else if (scored.length) {
+      const explanationLines = scored
+        .map((q, idx) => {
+          const explanation = q.explanation || "This concept is tested by identifying the correct option based on SQL/DBMS fundamentals.";
+          return `${idx + 1}) [${q.exam_title} - ${q.topic || "General"}] ${q.question_text}\nCorrect Option: ${q.correct_answer}\nExplanation: ${explanation}`;
+        })
+        .join("\n\n");
+
+      const weakTopics = weakTopicRows.length
+        ? `\n\nYour current weak topics: ${weakTopicRows
+            .map((w) => `${w.topic} (${Number(w.wrong_count)} wrong)`)
+            .join(", ")}.`
+        : "";
+
+      responseText = `I found closely related concepts/questions for your doubt:\n\n${explanationLines}${weakTopics}\n\nIf you want, ask: "give me practice on <topic>" and use Targeted Practice.`;
+    } else {
+      const weakTopics = weakTopicRows.length
+        ? `Your weak topics right now are: ${weakTopicRows
+            .map((w) => `${w.topic} (${Number(w.wrong_count)} wrong)`)
+            .join(", ")}.`
+        : "";
+      responseText = `Here's a general answer to your query. ${
+        weakTopics ? `${weakTopics} ` : ""
+      }If you want exam-specific help, mention exam name + attempt number (for example: "wrong answers in 1st attempt of DBMS exam").`;
+    }
+
+    // If user configured a real LLM key, prefer LLM response and fallback safely on any error.
+    try {
+      const llmResponse = await generateChatbotReplyWithGemini({
+        message: input,
+        weakTopicRows,
+        scored,
+        recentHistory: historyRows,
+        wrongAnswerContext
+      });
+      if (llmResponse) {
+        responseText = llmResponse;
+        mode = "gemini";
+      }
+    } catch (error) {
+      // Keep deterministic fallback responseText.
+      llmError = error.message;
+      responseText = `${responseText}\n\nNote: Gemini is currently busy/unavailable, so I answered using local tutor mode.`;
+    }
+
+    await pool.query(
+      `INSERT INTO doubt_log (student_id, query_text, response_text)
+       VALUES (?, ?, ?)`,
+      [studentId, input, responseText]
+    );
+
+    res.json({ response: responseText, mode, llmError });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

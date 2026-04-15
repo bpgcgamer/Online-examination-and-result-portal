@@ -169,22 +169,10 @@ async function renderAdminDashboard() {
     </section>
 
     <section class="card">
-      <h3>Create Exam Portal</h3>
-      <label for="examTitle">Exam Title</label>
-      <input id="examTitle" placeholder="e.g. DBMS Midterm" />
-      <label for="examCode">Exam Code</label>
-      <input id="examCode" placeholder="e.g. DBMS-MID-02" />
-
-      <label for="examPassMark">Pass Mark (%)</label>
-      <input id="examPassMark" type="number" min="1" max="100" value="40" />
-
-      <label for="durationMinutes">Duration (minutes)</label>
-      <input id="durationMinutes" type="number" min="10" value="60" />
-
-      <h3 class="space-top">Add Questions</h3>
-      <div id="questionsBuilder"></div>
-      <button class="btn-muted" id="addQuestionBtn">Add Question</button>
-      <button class="btn-primary" id="saveExamBtn">Save Exam</button>
+      <h3>Admin Actions</h3>
+      <p class="small">Use dedicated pages to keep the dashboard cleaner.</p>
+      <button class="btn-primary" id="openCreateExamPageBtn">Create Exam Page</button>
+      <button class="btn-secondary" id="openStudentPerformancePageBtn">Student Performance Page</button>
     </section>
 
     <section class="card">
@@ -193,8 +181,8 @@ async function renderAdminDashboard() {
     </section>
 
     <section class="card">
-      <h3>Student Performance (My Exams)</h3>
-      <div id="analyticsList"></div>
+      <h3>Leaderboard Rankings (My Exams)</h3>
+      <div id="leaderboardList"></div>
     </section>
 
     <section class="card">
@@ -215,88 +203,36 @@ async function renderAdminDashboard() {
   `;
 
   let exams = [];
-  let analytics = [];
   let mentors = [];
   let students = [];
   let assignments = [];
+  let leaderboardByExam = [];
   try {
     const response = await fetch(`${API_BASE}/exams?createdByAdminId=${session.userId}`);
     exams = await response.json();
-    const analyticsRes = await fetch(`${API_BASE}/admin/${session.userId}/analytics`);
-    analytics = await analyticsRes.json();
     const mentorsRes = await fetch(`${API_BASE}/mentors`);
     mentors = await mentorsRes.json();
     const studentsRes = await fetch(`${API_BASE}/students`);
     students = await studentsRes.json();
     const assignmentsRes = await fetch(`${API_BASE}/mentor-assignments`);
     assignments = await assignmentsRes.json();
+    leaderboardByExam = await Promise.all(
+      exams.map(async (exam) => {
+        try {
+          const res = await fetch(`${API_BASE}/leaderboard/exam/${exam.exam_id}`);
+          const rows = await res.json();
+          return { examId: Number(exam.exam_id), rows };
+        } catch (_error) {
+          return { examId: Number(exam.exam_id), rows: [] };
+        }
+      })
+    );
   } catch (_error) {
     exams = [];
-    analytics = [];
     mentors = [];
     students = [];
     assignments = [];
-  }
-
-  const builder = document.getElementById("questionsBuilder");
-  const questions = [];
-
-  function addQuestionUI() {
-    const index = questions.length;
-    questions.push({
-      text: "",
-      options: ["", "", "", ""],
-      correctIndex: 0,
-      marks: 5,
-      topic: "General"
-    });
-
-    const block = document.createElement("div");
-    block.className = "question-box";
-    block.innerHTML = `
-      <h4>Question ${index + 1}</h4>
-      <label>Question Text</label>
-      <input data-field="text" data-index="${index}" placeholder="Enter question text" />
-      <label>Option 1</label>
-      <input data-field="option0" data-index="${index}" placeholder="Option 1" />
-      <label>Option 2</label>
-      <input data-field="option1" data-index="${index}" placeholder="Option 2" />
-      <label>Option 3</label>
-      <input data-field="option2" data-index="${index}" placeholder="Option 3" />
-      <label>Option 4</label>
-      <input data-field="option3" data-index="${index}" placeholder="Option 4" />
-      <label>Correct Option (1-4)</label>
-      <input data-field="correctIndex" data-index="${index}" type="number" min="1" max="4" value="1" />
-      <label>Topic</label>
-      <input data-field="topic" data-index="${index}" value="General" placeholder="e.g. Normalization, Joins, Indexing" />
-      <label>Marks</label>
-      <input data-field="marks" data-index="${index}" type="number" min="5" step="5" value="5" />
-    `;
-    builder.appendChild(block);
-  }
-
-  function bindBuilderInputs() {
-    builder.addEventListener("input", (e) => {
-      const target = e.target;
-      const i = Number(target.dataset.index);
-      const field = target.dataset.field;
-      if (Number.isNaN(i) || !field) return;
-
-      if (field === "text") questions[i].text = target.value.trim();
-      if (field === "topic") questions[i].topic = target.value.trim() || "General";
-      if (field.startsWith("option")) {
-        const optionIndex = Number(field.replace("option", ""));
-        questions[i].options[optionIndex] = target.value.trim();
-      }
-      if (field === "correctIndex") questions[i].correctIndex = Number(target.value) - 1;
-      if (field === "marks") {
-        const entered = Number(target.value);
-        if (Number.isNaN(entered)) return;
-        const normalized = Math.max(5, Math.round(entered / 5) * 5);
-        questions[i].marks = normalized;
-        target.value = normalized;
-      }
-    });
+    leaderboardByExam = [];
   }
 
   function renderExamList() {
@@ -316,64 +252,6 @@ async function renderAdminDashboard() {
         </div>
       `
       )
-      .join("");
-  }
-
-  function renderAnalytics() {
-    const analyticsList = document.getElementById("analyticsList");
-    if (!analytics.length) {
-      analyticsList.innerHTML = `<p class="small">No analytics yet because you have not created any exams.</p>`;
-      return;
-    }
-
-    analyticsList.innerHTML = analytics
-      .map((exam) => {
-        const attemptsHeader = `
-          <div class="small">
-            Attempts: ${exam.attemptsCount} | Average Score: ${
-              exam.averagePercentage === null ? "N/A" : `${exam.averagePercentage}%`
-            }
-          </div>
-        `;
-
-        const attemptDetails = exam.performance.length
-          ? exam.performance
-              .map((p) => {
-                const wrongs = p.wrongQuestions.length
-                  ? p.wrongQuestions
-                      .map(
-                        (w) => `
-                        <li>
-                          <strong>Q${w.questionId}:</strong> ${w.questionText}<br />
-                          <span class="small">Selected Option: ${w.selectedOption || "Not answered"} | Correct Option: ${w.correctAnswer}</span>
-                        </li>
-                      `
-                      )
-                      .join("")
-                  : `<li><span class="small">No wrong answers in this attempt.</span></li>`;
-
-                return `
-                  <div class="question-box">
-                    <div><strong>${p.studentName}</strong> (${p.status})</div>
-                    <div class="small">Score: ${p.rawScore}/${p.totalMarks} (${p.percentage}%)</div>
-                    <div class="small">Attempted On: ${formatDateTime(p.attemptDate)}</div>
-                    <div class="small space-top"><strong>Wrong Questions:</strong></div>
-                    <ul class="small">${wrongs}</ul>
-                  </div>
-                `;
-              })
-              .join("")
-          : `<p class="small">No student attempts yet for this exam.</p>`;
-
-        return `
-          <div class="question-box">
-            <strong>${exam.examTitle}</strong>
-            <div class="small">Code: ${exam.examCode}</div>
-            ${attemptsHeader}
-            <div class="space-top">${attemptDetails}</div>
-          </div>
-        `;
-      })
       .join("");
   }
 
@@ -431,9 +309,60 @@ async function renderAdminDashboard() {
     });
   }
 
-  document.getElementById("logoutBtn").addEventListener("click", clearSession);
+  function renderAdminLeaderboards() {
+    const leaderboardList = document.getElementById("leaderboardList");
+    if (!exams.length) {
+      leaderboardList.innerHTML = `<p class="small">Create exams first to see rankings.</p>`;
+      return;
+    }
 
-  document.getElementById("addQuestionBtn").addEventListener("click", addQuestionUI);
+    leaderboardList.innerHTML = exams
+      .map((exam) => {
+        const lb = leaderboardByExam.find((x) => x.examId === Number(exam.exam_id));
+        const topRows = (lb?.rows || []).slice(0, 5);
+        const tableRows = topRows.length
+          ? topRows
+              .map(
+                (row) => `
+              <tr>
+                <td>#${row.rank}</td>
+                <td>${row.student_name}</td>
+                <td>${row.best_score}%</td>
+                <td>${row.latest_score}%</td>
+                <td>${row.attempts_count}</td>
+              </tr>
+            `
+              )
+              .join("")
+          : `<tr><td colspan="5" class="small">No attempts yet for this exam.</td></tr>`;
+
+        return `
+          <div class="question-box">
+            <strong>${exam.title}</strong>
+            <div class="small">Top performers (best score ranking)</div>
+            <table class="leaderboard-table">
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Student</th>
+                  <th>Best</th>
+                  <th>Latest</th>
+                  <th>Attempts</th>
+                </tr>
+              </thead>
+              <tbody>${tableRows}</tbody>
+            </table>
+          </div>
+        `;
+      })
+      .join("");
+  }
+
+  document.getElementById("logoutBtn").addEventListener("click", clearSession);
+  document.getElementById("openCreateExamPageBtn").addEventListener("click", renderAdminCreateExamPage);
+  document
+    .getElementById("openStudentPerformancePageBtn")
+    .addEventListener("click", renderAdminStudentPerformancePage);
   document.getElementById("assignMentorBtn").addEventListener("click", () => {
     const mentorId = Number(document.getElementById("mentorSelect").value);
     const studentId = Number(document.getElementById("studentSelect").value);
@@ -456,6 +385,135 @@ async function renderAdminDashboard() {
       .catch((err) => alert(err.message));
   });
 
+  renderExamList();
+  renderAdminLeaderboards();
+  renderAssignmentControls();
+}
+
+function setupAdminQuestionBuilder(builder, questions) {
+  function addQuestionUI() {
+    const index = questions.length;
+    questions.push({
+      text: "",
+      options: ["", "", "", ""],
+      correctIndex: 0,
+      marks: 5,
+      topic: "General",
+      explanation: ""
+    });
+
+    const block = document.createElement("div");
+    block.className = "question-box";
+    block.innerHTML = `
+      <h4>Question ${index + 1}</h4>
+      <label>Question Text</label>
+      <input data-field="text" data-index="${index}" placeholder="Enter question text" />
+      <label>Option 1</label>
+      <input data-field="option0" data-index="${index}" placeholder="Option 1" />
+      <label>Option 2</label>
+      <input data-field="option1" data-index="${index}" placeholder="Option 2" />
+      <label>Option 3</label>
+      <input data-field="option2" data-index="${index}" placeholder="Option 3" />
+      <label>Option 4</label>
+      <input data-field="option3" data-index="${index}" placeholder="Option 4" />
+      <label>Correct Option (1-4)</label>
+      <input data-field="correctIndex" data-index="${index}" type="number" min="1" max="4" value="1" />
+      <label>Topic</label>
+      <input data-field="topic" data-index="${index}" value="General" placeholder="e.g. Normalization, Joins, Indexing" />
+      <label>Explanation (shown for wrong answers)</label>
+      <textarea data-field="explanation" data-index="${index}" placeholder="Explain why the correct option is right"></textarea>
+      <label>Marks</label>
+      <input data-field="marks" data-index="${index}" type="number" min="5" step="5" value="5" />
+    `;
+    builder.appendChild(block);
+  }
+
+  builder.addEventListener("input", (e) => {
+    const target = e.target;
+    const i = Number(target.dataset.index);
+    const field = target.dataset.field;
+    if (Number.isNaN(i) || !field) return;
+
+    if (field === "text") questions[i].text = target.value.trim();
+    if (field === "topic") questions[i].topic = target.value.trim() || "General";
+    if (field === "explanation") questions[i].explanation = target.value.trim();
+    if (field.startsWith("option")) {
+      const optionIndex = Number(field.replace("option", ""));
+      questions[i].options[optionIndex] = target.value.trim();
+    }
+    if (field === "correctIndex") questions[i].correctIndex = Number(target.value) - 1;
+    if (field === "marks") {
+      const entered = Number(target.value);
+      if (Number.isNaN(entered)) return;
+      const normalized = Math.max(5, Math.round(entered / 5) * 5);
+      questions[i].marks = normalized;
+      target.value = normalized;
+    }
+  });
+
+  addQuestionUI();
+  return { addQuestionUI };
+}
+
+function validateAdminQuestions(questions) {
+  for (let i = 0; i < questions.length; i += 1) {
+    const q = questions[i];
+    if (
+      !q.text ||
+      q.options.some((op) => !op) ||
+      !q.topic ||
+      q.correctIndex < 0 ||
+      q.correctIndex > 3 ||
+      q.marks < 5 ||
+      q.marks % 5 !== 0
+    ) {
+      return `Question ${i + 1} is incomplete or invalid.`;
+    }
+  }
+  return "";
+}
+
+async function renderAdminCreateExamPage() {
+  const session = readSession();
+  app.className = "";
+
+  app.innerHTML = `
+    <section class="card">
+      <div class="row">
+        <div>
+          <h2>Create Exam</h2>
+          <p class="small">Dedicated page to create exams cleanly.</p>
+        </div>
+        <div style="text-align:right;">
+          <button class="btn-muted" id="backAdminHomeBtn">Back</button>
+          <button class="btn-muted" id="logoutBtn">Logout</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <label for="examTitle">Exam Title</label>
+      <input id="examTitle" placeholder="e.g. DBMS Midterm" />
+      <label for="examCode">Exam Code</label>
+      <input id="examCode" placeholder="e.g. DBMS-MID-02" />
+      <label for="examPassMark">Pass Mark (%)</label>
+      <input id="examPassMark" type="number" min="1" max="100" value="40" />
+      <label for="durationMinutes">Duration (minutes)</label>
+      <input id="durationMinutes" type="number" min="10" value="60" />
+      <h3 class="space-top">Add Questions</h3>
+      <div id="questionsBuilder"></div>
+      <button class="btn-muted" id="addQuestionBtn">Add Question</button>
+      <button class="btn-primary" id="saveExamBtn">Save Exam</button>
+    </section>
+  `;
+
+  const builder = document.getElementById("questionsBuilder");
+  const questions = [];
+  const { addQuestionUI } = setupAdminQuestionBuilder(builder, questions);
+
+  document.getElementById("backAdminHomeBtn").addEventListener("click", renderAdminDashboard);
+  document.getElementById("logoutBtn").addEventListener("click", clearSession);
+  document.getElementById("addQuestionBtn").addEventListener("click", addQuestionUI);
   document.getElementById("saveExamBtn").addEventListener("click", () => {
     const title = document.getElementById("examTitle").value.trim();
     const examCode = document.getElementById("examCode").value.trim();
@@ -469,21 +527,10 @@ async function renderAdminDashboard() {
       alert("Please add at least one question.");
       return;
     }
-
-    for (let i = 0; i < questions.length; i += 1) {
-      const q = questions[i];
-      if (
-        !q.text ||
-        q.options.some((op) => !op) ||
-        !q.topic ||
-        q.correctIndex < 0 ||
-        q.correctIndex > 3 ||
-        q.marks < 5 ||
-        q.marks % 5 !== 0
-      ) {
-        alert(`Question ${i + 1} is incomplete or invalid.`);
-        return;
-      }
+    const validationError = validateAdminQuestions(questions);
+    if (validationError) {
+      alert(validationError);
+      return;
     }
 
     const payload = {
@@ -500,7 +547,8 @@ async function renderAdminDashboard() {
         option4: q.options[3],
         correctAnswer: q.correctIndex + 1,
         marksAllocated: q.marks,
-        topic: q.topic
+        topic: q.topic,
+        explanation: q.explanation
       }))
     };
 
@@ -517,12 +565,108 @@ async function renderAdminDashboard() {
       })
       .catch((err) => alert(err.message));
   });
+}
 
-  addQuestionUI();
-  bindBuilderInputs();
-  renderExamList();
-  renderAnalytics();
-  renderAssignmentControls();
+async function renderAdminStudentPerformancePage() {
+  const session = readSession();
+  app.className = "";
+
+  let students = [];
+  try {
+    const res = await fetch(`${API_BASE}/admin/${session.userId}/students-performance-list`);
+    students = await res.json();
+  } catch (_error) {
+    students = [];
+  }
+
+  app.innerHTML = `
+    <section class="card">
+      <div class="row">
+        <div>
+          <h2>Student Performance</h2>
+          <p class="small">Select a student to view attempt-wise performance across your exams.</p>
+        </div>
+        <div style="text-align:right;">
+          <button class="btn-muted" id="backAdminHomeBtn">Back</button>
+          <button class="btn-muted" id="logoutBtn">Logout</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <label for="adminStudentSelect">Select Student</label>
+      <select id="adminStudentSelect">
+        ${
+          students.length
+            ? students
+                .map((s) => `<option value="${s.student_id}">${s.student_name} (${s.enrollment_no})</option>`)
+                .join("")
+            : '<option value="">No students with attempts in your exams</option>'
+        }
+      </select>
+      <button class="btn-primary space-top" id="loadStudentPerformanceBtn">Load Performance</button>
+    </section>
+
+    <section class="card">
+      <h3>Attempt Details</h3>
+      <div id="adminStudentPerformanceList">
+        <p class="small">Choose a student and click "Load Performance".</p>
+      </div>
+    </section>
+  `;
+
+  document.getElementById("backAdminHomeBtn").addEventListener("click", renderAdminDashboard);
+  document.getElementById("logoutBtn").addEventListener("click", clearSession);
+  document.getElementById("loadStudentPerformanceBtn").addEventListener("click", async () => {
+    const studentId = Number(document.getElementById("adminStudentSelect").value);
+    if (!studentId) {
+      alert("Please choose a student.");
+      return;
+    }
+    let rows = [];
+    try {
+      const res = await fetch(`${API_BASE}/admin/${session.userId}/students/${studentId}/performance`);
+      rows = await res.json();
+    } catch (_error) {
+      rows = [];
+    }
+
+    const target = document.getElementById("adminStudentPerformanceList");
+    if (!rows.length) {
+      target.innerHTML = `<p class="small">No attempts found for this student in your exams.</p>`;
+      return;
+    }
+
+    const grouped = new Map();
+    rows.forEach((row) => {
+      const key = `${row.exam_id}|${row.exam_title}`;
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push(row);
+    });
+
+    target.innerHTML = Array.from(grouped.entries())
+      .map(([key, attempts]) => {
+        const [, examTitle] = key.split("|");
+        const attemptsHtml = attempts
+          .map(
+            (a) => `
+            <div class="attempt-item">
+              <div><strong>Attempt #${a.attempt_number}</strong> ${a.is_best_score === 1 ? "<span class='small'>(Best)</span>" : ""}</div>
+              <div class="small">Score: ${a.raw_score}/${a.total_marks_snapshot} (${a.score_obtained}%)</div>
+              <div class="small">Status: ${a.status} | Date: ${formatDateTime(a.attempt_date)}</div>
+            </div>
+          `
+          )
+          .join("");
+        return `
+          <div class="question-box">
+            <strong>${examTitle}</strong>
+            <div class="attempt-list space-top">${attemptsHtml}</div>
+          </div>
+        `;
+      })
+      .join("");
+  });
 }
 
 function groupResultsByExam(results) {
@@ -661,6 +805,10 @@ async function renderStudentDashboard() {
       <button class="btn-secondary" id="openResultPortalBtn">Open Result Portal</button>
       <p class="small space-top">See which topics you struggled with most, broken down by exam.</p>
       <button class="btn-secondary" id="openWeakAreaPortalBtn">Weak Area Analysis</button>
+      <p class="small space-top">Check your rank among other students overall and by exam.</p>
+      <button class="btn-secondary" id="openLeaderboardBtn">Leaderboard & Ranking</button>
+      <p class="small space-top">Ask anything (general AI) or get exam-specific guidance.</p>
+      <button class="btn-secondary" id="openAiChatbotBtn">AI Doubt Solver</button>
     </section>
   `;
 
@@ -670,6 +818,8 @@ async function renderStudentDashboard() {
   });
   document.getElementById("openResultPortalBtn").addEventListener("click", renderStudentResultPortal);
   document.getElementById("openWeakAreaPortalBtn").addEventListener("click", renderWeakAreaPortal);
+  document.getElementById("openLeaderboardBtn").addEventListener("click", renderLeaderboardPortal);
+  document.getElementById("openAiChatbotBtn").addEventListener("click", renderAiChatbotPortal);
 }
 
 async function renderStudentResultPortal() {
@@ -847,7 +997,7 @@ async function renderWeakAreaPortal() {
       <div class="row">
         <div>
           <h2>Weak Area Analysis</h2>
-          <p class="small">Topics ranked by how many questions you got wrong in each exam — not a percentage score.</p>
+          <p class="small">Topics ranked by how many questions you got wrong in each exam.</p>
         </div>
         <div style="text-align:right;">
           <button class="btn-muted" id="weakAreaBackBtn">Back</button>
@@ -1084,40 +1234,295 @@ async function renderTargetedPracticePortal(presetExamId) {
     `;
 
     document.getElementById("submitPracticeBtn").addEventListener("click", () => {
-      let correct = 0;
-      const wrongItems = [];
-      questions.forEach((q) => {
+      const answers = questions.map((q) => {
         const selected = document.querySelector(`input[name="pq${q.question_id}"]:checked`);
-        const selectedValue = selected ? Number(selected.value) : 0;
-        if (selectedValue === Number(q.correct_answer)) {
-          correct += 1;
-        } else {
-          wrongItems.push({
-            question: q.question_text,
-            selected: selectedValue || "Not answered",
-            correct: q.correct_answer
-          });
-        }
+        return {
+          questionId: q.question_id,
+          selectedOption: selected ? Number(selected.value) : 0
+        };
       });
 
-      const attempted = questions.length;
-      const score = attempted === 0 ? 0 : Number(((correct / attempted) * 100).toFixed(2));
-      const resultBox = document.getElementById("practiceResultBox");
-      resultBox.innerHTML = `
-        <div class="result-card">
-          <div class="small">Practice Score</div>
-          <strong>${correct}/${attempted} (${score}%)</strong>
-        </div>
-        ${
-          wrongItems.length
-            ? `<div class="space-top small"><strong>Review Incorrect Questions:</strong></div>
-               <ul class="small">${wrongItems
-                 .map((w) => `<li>${w.question} (Selected: ${w.selected}, Correct: ${w.correct})</li>`)
-                 .join("")}</ul>`
-            : `<p class="small text-success">Excellent! All answers are correct.</p>`
-        }
-      `;
+      fetch(`${API_BASE}/practice/submit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          studentId: session.userId,
+          examId: ex.exam_id,
+          topic,
+          answers
+        })
+      })
+        .then(async (res) => ({ ok: res.ok, data: await res.json() }))
+        .then(({ ok, data }) => {
+          if (!ok) throw new Error(data.message || "Practice submission failed.");
+          const resultBox = document.getElementById("practiceResultBox");
+          resultBox.innerHTML = `
+            <div class="result-card">
+              <div class="small">Practice Score</div>
+              <strong>${data.correctAnswers}/${data.totalQuestions} (${data.scorePercent}%)</strong>
+            </div>
+            <div class="small space-top">Saved as Practice Attempt #${data.practiceAttemptId}</div>
+            ${
+              data.wrongAnswers && data.wrongAnswers.length
+                ? `<div class="space-top small"><strong>Review Incorrect Questions & Explanations:</strong></div>
+                   <ul class="small">${data.wrongAnswers
+                     .map(
+                       (w) =>
+                         `<li><strong>${w.questionText}</strong><br/>Selected: ${
+                           w.selectedOption || "Not answered"
+                         } | Correct: ${w.correctAnswer}<br/>Explanation: ${w.explanation}</li>`
+                     )
+                     .join("")}</ul>`
+                : `<p class="small text-success">Excellent! All answers are correct.</p>`
+            }
+          `;
+        })
+        .catch((err) => alert(err.message));
     });
+  });
+}
+
+async function renderLeaderboardPortal() {
+  const session = readSession();
+  app.className = "";
+
+  let overallRows = [];
+  let exams = [];
+  let examLeaderboards = [];
+  try {
+    const overallRes = await fetch(`${API_BASE}/leaderboard/overall`);
+    overallRows = await overallRes.json();
+    const examsRes = await fetch(`${API_BASE}/exams`);
+    exams = await examsRes.json();
+    examLeaderboards = await Promise.all(
+      exams.map(async (exam) => {
+        try {
+          const lbRes = await fetch(`${API_BASE}/leaderboard/exam/${exam.exam_id}`);
+          const rows = await lbRes.json();
+          return { exam, rows };
+        } catch (_error) {
+          return { exam, rows: [] };
+        }
+      })
+    );
+  } catch (_error) {
+    overallRows = [];
+    exams = [];
+    examLeaderboards = [];
+  }
+
+  const myOverall = overallRows.find((r) => Number(r.student_id) === Number(session.userId));
+  const overallTableRows = overallRows.length
+    ? overallRows
+        .slice(0, 10)
+        .map(
+          (row) => `
+        <tr ${Number(row.student_id) === Number(session.userId) ? 'class="highlight-row"' : ""}>
+          <td>#${row.rank}</td>
+          <td>${row.student_name}</td>
+          <td>${row.average_score}%</td>
+          <td>${row.best_score}%</td>
+          <td>${row.attempts_count}</td>
+        </tr>
+      `
+        )
+        .join("")
+    : `<tr><td colspan="5" class="small">No ranking data yet.</td></tr>`;
+
+  const examBlocks = examLeaderboards.length
+    ? examLeaderboards
+        .map(({ exam, rows }) => {
+          const myRow = rows.find((r) => Number(r.student_id) === Number(session.userId));
+          const topRows = rows.slice(0, 5);
+          const tableRows = topRows.length
+            ? topRows
+                .map(
+                  (row) => `
+                <tr ${Number(row.student_id) === Number(session.userId) ? 'class="highlight-row"' : ""}>
+                  <td>#${row.rank}</td>
+                  <td>${row.student_name}</td>
+                  <td>${row.best_score}%</td>
+                  <td>${row.latest_score}%</td>
+                  <td>${row.attempts_count}</td>
+                </tr>
+              `
+                )
+                .join("")
+            : `<tr><td colspan="5" class="small">No attempts yet for this exam.</td></tr>`;
+
+          return `
+            <section class="card result-portal-card">
+              <h3>${exam.title}</h3>
+              <div class="small">${
+                myRow
+                  ? `Your rank: #${myRow.rank} | Best: ${myRow.best_score}%`
+                  : "You are not ranked yet for this exam."
+              }</div>
+              <table class="leaderboard-table">
+                <thead>
+                  <tr>
+                    <th>Rank</th>
+                    <th>Student</th>
+                    <th>Best</th>
+                    <th>Latest</th>
+                    <th>Attempts</th>
+                  </tr>
+                </thead>
+                <tbody>${tableRows}</tbody>
+              </table>
+            </section>
+          `;
+        })
+        .join("")
+    : `<section class="card"><p class="small">No exams found for leaderboard.</p></section>`;
+
+  app.innerHTML = `
+    <section class="card">
+      <div class="row">
+        <div>
+          <h2>Leaderboard & Ranking</h2>
+          <p class="small">Overall and exam-wise student ranks based on performance.</p>
+        </div>
+        <div style="text-align:right;">
+          <button class="btn-muted" id="leaderboardBackBtn">Back</button>
+          <button class="btn-muted" id="logoutBtn">Logout</button>
+        </div>
+      </div>
+      <div class="result-grid">
+        <div class="result-card"><div class="small">Students Ranked</div><strong>${overallRows.length}</strong></div>
+        <div class="result-card"><div class="small">Your Overall Rank</div><strong>${
+          myOverall ? `#${myOverall.rank}` : "N/A"
+        }</strong></div>
+        <div class="result-card"><div class="small">Your Avg Score</div><strong>${
+          myOverall ? `${myOverall.average_score}%` : "N/A"
+        }</strong></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>Overall Top 10</h3>
+      <table class="leaderboard-table">
+        <thead>
+          <tr>
+            <th>Rank</th>
+            <th>Student</th>
+            <th>Average</th>
+            <th>Best</th>
+            <th>Attempts</th>
+          </tr>
+        </thead>
+        <tbody>${overallTableRows}</tbody>
+      </table>
+    </section>
+
+    ${examBlocks}
+  `;
+
+  document.getElementById("leaderboardBackBtn").addEventListener("click", renderStudentDashboard);
+  document.getElementById("logoutBtn").addEventListener("click", clearSession);
+}
+
+async function renderAiChatbotPortal() {
+  const session = readSession();
+  app.className = "";
+
+  let history = [];
+  try {
+    const res = await fetch(`${API_BASE}/chatbot/history/${session.userId}`);
+    history = await res.json();
+  } catch (_error) {
+    history = [];
+  }
+
+  app.innerHTML = `
+    <section class="card">
+      <div class="row">
+        <div>
+          <h2>AI Doubt Solver</h2>
+          <p class="small">General AI assistant with optional exam-aware support (wrong answers, weak topics, practice).</p>
+        </div>
+        <div style="text-align:right;">
+          <button class="btn-muted" id="chatbotBackBtn">Back</button>
+          <button class="btn-muted" id="logoutBtn">Logout</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>Chat</h3>
+      <div id="chatbotMessages" class="chatbot-messages"></div>
+      <label for="chatbotInput" class="space-top">Your doubt</label>
+      <textarea id="chatbotInput" placeholder="e.g. Explain difference between WHERE and HAVING with an example"></textarea>
+      <button class="btn-primary space-top" id="chatbotSendBtn">Ask AI Tutor</button>
+    </section>
+  `;
+
+  const messagesEl = document.getElementById("chatbotMessages");
+  const inputEl = document.getElementById("chatbotInput");
+  function escapeHtml(value) {
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function appendMessage(role, text) {
+    const block = document.createElement("div");
+    block.className = `chatbot-message ${role === "student" ? "student" : "assistant"}`;
+    const safeText = escapeHtml(text).replace(/\n/g, "<br/>");
+    block.innerHTML = `
+      <div class="small"><strong>${role === "student" ? "You" : "AI Tutor"}</strong></div>
+      <div>${safeText}</div>
+    `;
+    messagesEl.appendChild(block);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  if (history.length) {
+    history
+      .slice()
+      .reverse()
+      .forEach((item) => {
+        appendMessage("student", item.query_text);
+        appendMessage("assistant", item.response_text);
+      });
+  } else {
+    appendMessage(
+      "assistant",
+      "Hi! Ask me anything. I can also use your exam data to explain wrong answers, weak topics, and targeted practice."
+    );
+  }
+
+  document.getElementById("chatbotBackBtn").addEventListener("click", renderStudentDashboard);
+  document.getElementById("logoutBtn").addEventListener("click", clearSession);
+  document.getElementById("chatbotSendBtn").addEventListener("click", async () => {
+    const message = inputEl.value.trim();
+    if (!message) {
+      alert("Please enter your doubt first.");
+      return;
+    }
+    appendMessage("student", message);
+    inputEl.value = "";
+
+    try {
+      const res = await fetch(`${API_BASE}/chatbot/ask`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          studentId: session.userId,
+          message
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Chatbot failed to respond.");
+      const modeLabel = data.mode === "gemini" ? "LLM mode: Gemini" : "LLM mode: Fallback tutor";
+      const errorLabel = data.llmError ? `\n\nLLM error: ${data.llmError}` : "";
+      appendMessage("assistant", `${data.response}\n\n[${modeLabel}]${errorLabel}`);
+    } catch (error) {
+      appendMessage("assistant", `Error: ${error.message}`);
+    }
   });
 }
 
@@ -1263,8 +1668,20 @@ async function renderExamAttempt(examId) {
       .then(async (res) => ({ ok: res.ok, data: await res.json() }))
       .then(({ ok, data }) => {
         if (!ok) throw new Error(data.message || "Submission failed.");
+        const explanationPreview =
+          data.wrongAnswers && data.wrongAnswers.length
+            ? `\n\nWrong Answer Explanations:\n${data.wrongAnswers
+                .slice(0, 3)
+                .map(
+                  (w, idx) =>
+                    `${idx + 1}) ${w.questionText}\n   Selected: ${
+                      w.selectedOption || "Not answered"
+                    }, Correct: ${w.correctAnswer}\n   ${w.explanation}`
+                )
+                .join("\n\n")}${data.wrongAnswers.length > 3 ? "\n\n...more in this attempt review soon." : ""}`
+            : "";
         alert(
-          `Exam submitted.\nAttempt #${data.attemptNumber}\nScore: ${data.rawScore}/${data.totalMarks}\nPercentage: ${data.percentage}%\nStatus: ${data.status}`
+          `Exam submitted.\nAttempt #${data.attemptNumber}\nScore: ${data.rawScore}/${data.totalMarks}\nPercentage: ${data.percentage}%\nStatus: ${data.status}${explanationPreview}`
         );
         renderStudentDashboard();
       })

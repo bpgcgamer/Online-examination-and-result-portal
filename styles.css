@@ -282,3 +282,51 @@ button {
   margin-bottom: 8px;
   line-height: 1.45;
 }
+
+.leaderboard-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+}
+
+.leaderboard-table th,
+.leaderboard-table td {
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 13px;
+}
+
+.leaderboard-table th {
+  background: #f5f7ff;
+}
+
+.highlight-row {
+  background: #eefaf7;
+}
+
+.chatbot-messages {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fcfdff;
+  padding: 10px;
+  min-height: 180px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.chatbot-message {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  line-height: 1.45;
+}
+
+.chatbot-message.student {
+  background: #eef2ff;
+}
+
+.chatbot-message.assistant {
+  background: #f4fbf9;
+}
