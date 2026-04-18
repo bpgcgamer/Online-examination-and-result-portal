@@ -64,6 +64,7 @@ CREATE TABLE question (
   option_4 VARCHAR(255) NOT NULL,
   correct_answer TINYINT NOT NULL CHECK (correct_answer BETWEEN 1 AND 4),
   marks_allocated INT NOT NULL DEFAULT 1 CHECK (marks_allocated > 0 AND marks_allocated <= 100),
+  explanation TEXT,
   CONSTRAINT fk_question_exam FOREIGN KEY (exam_id) REFERENCES exam(exam_id) ON DELETE CASCADE
 );
 

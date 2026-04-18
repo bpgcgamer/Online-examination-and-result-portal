@@ -1,6 +1,35 @@
 const API_BASE = "/api";
 const SESSION_KEY = "examPortalSession";
+const THEME_KEY = "examPortalTheme";
 const app = document.getElementById("app");
+
+function getPreferredTheme() {
+  const saved = localStorage.getItem(THEME_KEY);
+  if (saved === "light" || saved === "dark") return saved;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  const toggleBtn = document.getElementById("themeToggleBtn");
+  if (toggleBtn) {
+    toggleBtn.textContent = theme === "dark" ? "Light Mode" : "Dark Mode";
+    toggleBtn.setAttribute("aria-label", theme === "dark" ? "Switch to light mode" : "Switch to dark mode");
+  }
+}
+
+function initTheme() {
+  applyTheme(getPreferredTheme());
+  const toggleBtn = document.getElementById("themeToggleBtn");
+  if (!toggleBtn) return;
+  toggleBtn.addEventListener("click", () => {
+    const current = document.documentElement.getAttribute("data-theme") || "light";
+    const next = current === "dark" ? "light" : "dark";
+    localStorage.setItem(THEME_KEY, next);
+    applyTheme(next);
+    render();
+  });
+}
 
 function readSession() {
   const raw = localStorage.getItem(SESSION_KEY);
@@ -27,10 +56,23 @@ function clearSession() {
 
 function renderAuthScreen(mode = "login", error = "", info = "") {
   const isSignup = mode === "signup";
-  const title = isSignup ? "Sign Up" : "Login";
-  const helper = isSignup
-    ? "Create your account as Student, Admin, or Mentor."
-    : "Use your credentials to continue.";
+  const isForgot = mode === "forgot";
+  const isReset = mode === "reset";
+  
+  let title = "Login";
+  let helper = "Use your credentials to continue.";
+  
+  if (isSignup) {
+    title = "Sign Up";
+    helper = "Create your account as Student, Admin, or Mentor.";
+  } else if (isForgot) {
+    title = "Forgot Password";
+    helper = "Enter your details to find your security question.";
+  } else if (isReset) {
+    title = "Reset Password";
+    helper = "Answer your security question to set a new password.";
+  }
+
   const nameField = isSignup
     ? `
         <div>
@@ -40,114 +82,221 @@ function renderAuthScreen(mode = "login", error = "", info = "") {
       `
     : "";
 
+  const securityFields = isSignup
+    ? `
+        <div>
+          <label for="securityQuestion">Security Question</label>
+          <input id="securityQuestion" placeholder="e.g., Your first pet's name?" />
+        </div>
+        <div>
+          <label for="securityAnswer">Security Answer</label>
+          <input id="securityAnswer" placeholder="Enter answer" />
+        </div>
+      `
+    : "";
+
+  const resetFields = isReset
+    ? `
+        <div class="space-top">
+          <p><strong>Question:</strong> <span id="displayQuestion"></span></p>
+        </div>
+        <div>
+          <label for="securityAnswer">Your Answer</label>
+          <input id="securityAnswer" placeholder="Enter answer" />
+        </div>
+        <div>
+          <label for="newPassword">New Password</label>
+          <input id="newPassword" type="password" placeholder="Enter new password" />
+        </div>
+      `
+    : "";
+
   app.className = "auth-layout";
 
   app.innerHTML = `
     <section class="card auth-card">
-      <h2>${title}</h2>
-      <p class="small">${helper}</p>
-      <div class="row">
-        ${nameField}
+      <div class="auth-shell">
+        <aside class="auth-side">
+          <h3>Secure Access</h3>
+          <p class="small">Use one identity for exams, analytics, mentoring, and AI-assisted doubt solving.</p>
+          <ul class="auth-points small">
+            <li>Role-based dashboards and workflows</li>
+            <li>Exam attempt history and progress insights</li>
+            <li>Password recovery with security questions</li>
+          </ul>
+        </aside>
+
         <div>
-          <label for="role">Role</label>
-          <select id="role">
-            <option value="student">Student</option>
-            <option value="admin">Admin</option>
-            <option value="mentor">Mentor</option>
-          </select>
+          <span class="hero-kicker">Portal Entry</span>
+          <h2 class="hero-title">${title}</h2>
+          <p class="small section-subtitle">${helper}</p>
+
+          <div class="row">
+            ${nameField}
+            <div>
+              <label for="role">Role</label>
+              <select id="role">
+                <option value="student">Student</option>
+                <option value="admin">Admin</option>
+                <option value="mentor">Mentor</option>
+              </select>
+            </div>
+            <div>
+              <label for="identifier">${isSignup || isForgot || isReset ? "Username / Email" : "Username (Admin/Mentor) or Email (Student)"}</label>
+              <input id="identifier" placeholder="Enter username or email" />
+            </div>
+            ${!isForgot && !isReset ? `
+            <div>
+              <label for="password">Password</label>
+              <input id="password" type="password" placeholder="Enter password" />
+            </div>
+            ` : ""}
+            ${securityFields}
+            ${resetFields}
+          </div>
+
+          ${error ? `<p class="small text-danger">${error}</p>` : ""}
+          ${info ? `<p class="small text-success">${info}</p>` : ""}
+
+          <div class="auth-form-actions space-top">
+            <button class="btn-primary" id="primaryBtn">
+              ${isSignup ? "Create Account" : isForgot ? "Find Question" : isReset ? "Reset Password" : "Login"}
+            </button>
+            <button class="btn-muted" id="switchAuthBtn">
+              ${isSignup || isForgot || isReset ? "Back to Login" : "New user? Sign Up"}
+            </button>
+          </div>
+
+          ${!isSignup && !isForgot && !isReset ? `
+            <div class="text-center space-top">
+              <a href="#" id="forgotPasswordLink" class="small link-button">Forgot Password?</a>
+            </div>
+          ` : ""}
+
+          <div class="note-box small">
+            <div><strong>Note:</strong> First-time users should create an account first.</div>
+          </div>
         </div>
-        <div>
-          <label for="identifier">${isSignup ? "Username / Email" : "Username (Admin/Mentor) or Email (Student)"}</label>
-          <input id="identifier" placeholder="${isSignup ? "Enter username or email" : "Enter username/email"}" />
-        </div>
-        <div>
-          <label for="password">Password</label>
-          <input id="password" type="password" placeholder="Enter password" />
-        </div>
-      </div>
-      ${error ? `<p class="small text-danger">${error}</p>` : ""}
-      ${info ? `<p class="small text-success">${info}</p>` : ""}
-      <button class="btn-primary" id="primaryBtn">${isSignup ? "Create Account" : "Login"}</button>
-      <button class="btn-muted" id="switchAuthBtn">${isSignup ? "Back to Login" : "New user? Sign Up"}</button>
-      <div class="space-top small">
-        <div><strong>Note:</strong> First-time users should create an account first.</div>
       </div>
     </section>
   `;
 
+  if (window._forgotState && isReset) {
+    document.getElementById("identifier").value = window._forgotState.identifier;
+    document.getElementById("role").value = window._forgotState.role;
+    document.getElementById("displayQuestion").innerText = window._forgotState.question;
+  }
+
   document.getElementById("switchAuthBtn").addEventListener("click", () => {
-    renderAuthScreen(isSignup ? "login" : "signup");
-  });
+  renderAuthScreen(mode === "login" ? "signup" : "login");
+});
+
+  if (document.getElementById("forgotPasswordLink")) {
+    document.getElementById("forgotPasswordLink").addEventListener("click", (e) => {
+      e.preventDefault();
+      renderAuthScreen("forgot");
+    });
+  }
 
   document.getElementById("primaryBtn").addEventListener("click", () => {
-    const nameInput = document.getElementById("name");
-    const fullName = nameInput ? nameInput.value.trim() : "";
     const role = document.getElementById("role").value;
     const identifier = document.getElementById("identifier").value.trim();
-    const password = document.getElementById("password").value.trim();
-    if (!identifier || !password || (isSignup && !fullName)) {
+    
+    if (isForgot) {
+      if (!identifier) return renderAuthScreen("forgot", "Please enter your username/email.");
+      fetch(`${API_BASE}/auth/forgot-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role, identifier })
+      })
+      .then(async res => ({ ok: res.ok, data: await res.json() }))
+      .then(({ ok, data }) => {
+        if (!ok) throw new Error(data.message);
+        window._forgotState = { role, identifier, question: data.securityQuestion };
+        renderAuthScreen("reset");
+      })
+      .catch(err => renderAuthScreen("forgot", err.message));
+      return;
+    }
+
+    if (isReset) {
+      const securityAnswer = document.getElementById("securityAnswer").value.trim();
+      const newPassword = document.getElementById("newPassword").value.trim();
+      if (!securityAnswer || !newPassword) return renderAuthScreen("reset", "Please fill all fields.");
+      
+      fetch(`${API_BASE}/auth/reset-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role, identifier, securityAnswer, newPassword })
+      })
+      .then(async res => ({ ok: res.ok, data: await res.json() }))
+      .then(({ ok, data }) => {
+        if (!ok) throw new Error(data.message);
+        renderAuthScreen("login", "", "Password reset successful. Please login.");
+      })
+      .catch(err => renderAuthScreen("reset", err.message));
+      return;
+    }
+
+    const password = document.getElementById("password") ? document.getElementById("password").value.trim() : "";
+    const nameInput = document.getElementById("name");
+    const fullName = nameInput ? nameInput.value.trim() : "";
+    
+    if (!identifier || (!isForgot && !isReset && !password) || (isSignup && !fullName)) {
       renderAuthScreen(mode, "Please fill all required fields.");
       return;
     }
 
-    if (isSignup && role === "student") {
-      const parts = fullName.split(" ");
-      if (parts.length < 2) {
-        renderAuthScreen("signup", "For student signup, enter full name as FirstName LastName.");
-        return;
-      }
-    }
-
     if (isSignup) {
-      const payload =
-        role === "student"
-          ? {
-              role: "student",
-              email: identifier,
-              password,
-              firstName: fullName.split(" ")[0],
-              lastName: fullName.split(" ").slice(1).join(" "),
-              enrollmentNo: `ENR-${Date.now().toString().slice(-6)}`
-            }
-          : role === "admin"
-          ? {
-              role: "admin",
-              fullName,
-              username: identifier,
-              password
-            }
-          : {
-              role: "mentor",
-              fullName,
-              username: identifier,
-              password,
-            };
+      const securityQuestion = document.getElementById("securityQuestion").value.trim();
+      const securityAnswer = document.getElementById("securityAnswer").value.trim();
+      
+      const payload = role === "student" 
+        ? {
+            role: "student",
+            email: identifier,
+            password,
+            firstName: fullName.split(" ")[0],
+            lastName: fullName.split(" ").slice(1).join(" "),
+            enrollmentNo: `ENR-${Date.now().toString().slice(-6)}`,
+            securityQuestion,
+            securityAnswer
+          }
+        : {
+            role,
+            fullName,
+            username: identifier,
+            password,
+            securityQuestion,
+            securityAnswer
+          };
 
       fetch(`${API_BASE}/auth/signup`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       })
-        .then(async (res) => ({ ok: res.ok, data: await res.json() }))
-        .then(({ ok, data }) => {
-          if (!ok) throw new Error(data.message || "Signup failed.");
-          renderAuthScreen("login", "", "Account created successfully. Please login.");
-        })
-        .catch((err) => renderAuthScreen("signup", err.message));
+      .then(async res => ({ ok: res.ok, data: await res.json() }))
+      .then(({ ok, data }) => {
+        if (!ok) throw new Error(data.message);
+        renderAuthScreen("login", "", "Account created successfully. Please login.");
+      })
+      .catch(err => renderAuthScreen("signup", err.message));
       return;
     }
 
+    // Login
     fetch(`${API_BASE}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ role, identifier, password })
     })
-      .then(async (res) => ({ ok: res.ok, data: await res.json() }))
-      .then(({ ok, data }) => {
-        if (!ok) throw new Error(data.message || "Login failed.");
-        setSession(data);
-      })
-      .catch((err) => renderAuthScreen("login", err.message));
+    .then(async res => ({ ok: res.ok, data: await res.json() }))
+    .then(({ ok, data }) => {
+      if (!ok) throw new Error(data.message);
+      setSession(data);
+    })
+    .catch(err => renderAuthScreen("login", err.message));
   });
 }
 
@@ -156,50 +305,63 @@ async function renderAdminDashboard() {
   app.className = "";
 
   app.innerHTML = `
-    <section class="card">
-      <div class="row">
-        <div>
-          <h2>Admin Dashboard</h2>
-          <p class="small">Welcome, ${session.displayName}</p>
+    <div class="page-shell">
+      <section class="card hero-card">
+        <div class="hero-header">
+          <div>
+            <span class="hero-kicker">Admin Control</span>
+            <h2 class="hero-title">Dashboard Command Center</h2>
+            <p class="small hero-summary">Welcome, ${session.displayName}. Manage exam operations, mentor alignment, and leaderboard insights from a single workspace.</p>
+          </div>
+          <div class="actions-right">
+            <button class="btn-muted" id="logoutBtn">Logout</button>
+          </div>
         </div>
-        <div style="text-align:right;">
-          <button class="btn-muted" id="logoutBtn">Logout</button>
+      </section>
+
+      <section class="card">
+        <h3>Primary Actions</h3>
+        <div class="action-grid">
+          <article class="action-tile">
+            <strong>Create and publish exams</strong>
+            <p class="small">Define structure, pass marks, and question bank in a dedicated build flow.</p>
+            <button class="btn-primary action-cta" id="openCreateExamPageBtn">Open Create Exam</button>
+          </article>
+          <article class="action-tile">
+            <strong>Review student attempts</strong>
+            <p class="small">Inspect attempt-wise outcomes per student across your administered exams.</p>
+            <button class="btn-secondary action-cta" id="openStudentPerformancePageBtn">Open Performance View</button>
+          </article>
         </div>
+      </section>
+
+      <div class="dashboard-grid">
+        <section class="card">
+          <h3>Existing Exams</h3>
+          <div id="examList" class="list-stack"></div>
+        </section>
+        <section class="card">
+          <h3>Mentor-Student Assignment</h3>
+          <div class="row">
+            <div>
+              <label for="mentorSelect">Select Mentor</label>
+              <select id="mentorSelect"></select>
+            </div>
+            <div>
+              <label for="studentSelect">Select Student</label>
+              <select id="studentSelect"></select>
+            </div>
+          </div>
+          <button class="btn-primary" id="assignMentorBtn">Assign Student To Mentor</button>
+          <div id="assignmentList" class="space-top list-stack"></div>
+        </section>
       </div>
-    </section>
 
-    <section class="card">
-      <h3>Admin Actions</h3>
-      <p class="small">Use dedicated pages to keep the dashboard cleaner.</p>
-      <button class="btn-primary" id="openCreateExamPageBtn">Create Exam Page</button>
-      <button class="btn-secondary" id="openStudentPerformancePageBtn">Student Performance Page</button>
-    </section>
-
-    <section class="card">
-      <h3>Existing Exams</h3>
-      <div id="examList"></div>
-    </section>
-
-    <section class="card">
-      <h3>Leaderboard Rankings (My Exams)</h3>
-      <div id="leaderboardList"></div>
-    </section>
-
-    <section class="card">
-      <h3>Mentor-Student Assignment</h3>
-      <div class="row">
-        <div>
-          <label for="mentorSelect">Select Mentor</label>
-          <select id="mentorSelect"></select>
-        </div>
-        <div>
-          <label for="studentSelect">Select Student</label>
-          <select id="studentSelect"></select>
-        </div>
-      </div>
-      <button class="btn-primary" id="assignMentorBtn">Assign Student To Mentor</button>
-      <div id="assignmentList" class="space-top"></div>
-    </section>
+      <section class="card">
+        <h3>Leaderboard Rankings (My Exams)</h3>
+        <div id="leaderboardList" class="list-stack"></div>
+      </section>
+    </div>
   `;
 
   let exams = [];
@@ -484,7 +646,7 @@ async function renderAdminCreateExamPage() {
           <h2>Create Exam</h2>
           <p class="small">Dedicated page to create exams cleanly.</p>
         </div>
-        <div style="text-align:right;">
+        <div class="actions-right">
           <button class="btn-muted" id="backAdminHomeBtn">Back</button>
           <button class="btn-muted" id="logoutBtn">Logout</button>
         </div>
@@ -586,7 +748,7 @@ async function renderAdminStudentPerformancePage() {
           <h2>Student Performance</h2>
           <p class="small">Select a student to view attempt-wise performance across your exams.</p>
         </div>
-        <div style="text-align:right;">
+        <div class="actions-right">
           <button class="btn-muted" id="backAdminHomeBtn">Back</button>
           <button class="btn-muted" id="logoutBtn">Logout</button>
         </div>
@@ -687,6 +849,27 @@ function buildTrendSvg(resultsForExam) {
   const padding = 28;
   if (!resultsForExam.length) return "";
 
+  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  const palette = isDark
+    ? {
+        axis: "#334155",
+        grid1: "#243243",
+        grid2: "#1f2937",
+        line: "#2dd4bf",
+        dot: "#14b8a6",
+        text: "#e2e8f0",
+        muted: "#94a3b8"
+      }
+    : {
+        axis: "#d6cdbf",
+        grid1: "#efe7d8",
+        grid2: "#f7f2e7",
+        line: "#0d9488",
+        dot: "#0f766e",
+        text: "#1f2937",
+        muted: "#6b7280"
+      };
+
   const points = resultsForExam.map((r, idx) => {
     const x =
       resultsForExam.length === 1
@@ -702,17 +885,17 @@ function buildTrendSvg(resultsForExam) {
 
   return `
     <svg viewBox="0 0 ${width} ${height}" class="trend-chart" role="img" aria-label="Performance trend chart">
-      <line x1="${padding}" y1="${height - padding}" x2="${width - padding}" y2="${height - padding}" stroke="#c4ccee" stroke-width="1.5" />
-      <line x1="${padding}" y1="${padding}" x2="${padding}" y2="${height - padding}" stroke="#c4ccee" stroke-width="1.5" />
-      <line x1="${padding}" y1="${padding}" x2="${width - padding}" y2="${padding}" stroke="#e7ebfb" stroke-width="1" />
-      <line x1="${padding}" y1="${(height + padding) / 2}" x2="${width - padding}" y2="${(height + padding) / 2}" stroke="#eef2ff" stroke-width="1" />
-      <path d="${linePath}" fill="none" stroke="#5b4bdb" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+      <line x1="${padding}" y1="${height - padding}" x2="${width - padding}" y2="${height - padding}" stroke="${palette.axis}" stroke-width="1.5" />
+      <line x1="${padding}" y1="${padding}" x2="${padding}" y2="${height - padding}" stroke="${palette.axis}" stroke-width="1.5" />
+      <line x1="${padding}" y1="${padding}" x2="${width - padding}" y2="${padding}" stroke="${palette.grid1}" stroke-width="1" />
+      <line x1="${padding}" y1="${(height + padding) / 2}" x2="${width - padding}" y2="${(height + padding) / 2}" stroke="${palette.grid2}" stroke-width="1" />
+      <path d="${linePath}" fill="none" stroke="${palette.line}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
       ${points
         .map(
           (p) => `
-          <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4.5" fill="#14b8a6" />
-          <text x="${p.x.toFixed(1)}" y="${(p.y - 10).toFixed(1)}" text-anchor="middle" font-size="11" fill="#1b1f3b">${p.label}%</text>
-          <text x="${p.x.toFixed(1)}" y="${(height - 10).toFixed(1)}" text-anchor="middle" font-size="10" fill="#5f6785">A${p.attempt}</text>
+          <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4.5" fill="${palette.dot}" />
+          <text x="${p.x.toFixed(1)}" y="${(p.y - 10).toFixed(1)}" text-anchor="middle" font-size="11" fill="${palette.text}">${p.label}%</text>
+          <text x="${p.x.toFixed(1)}" y="${(height - 10).toFixed(1)}" text-anchor="middle" font-size="10" fill="${palette.muted}">A${p.attempt}</text>
         `
         )
         .join("")}
@@ -726,14 +909,29 @@ function buildSubjectBarChartSvg(subjectAverages) {
   const padding = 40;
   if (!subjectAverages.length) return "";
 
+  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  const palette = isDark
+    ? {
+        axis: "#334155",
+        bar: "#2dd4bf",
+        text: "#e2e8f0",
+        muted: "#94a3b8"
+      }
+    : {
+        axis: "#d6cdbf",
+        bar: "#0d9488",
+        text: "#1f2937",
+        muted: "#6b7280"
+      };
+
   const barGap = 18;
   const availableWidth = width - 2 * padding;
   const barWidth = Math.max(40, (availableWidth - barGap * (subjectAverages.length - 1)) / subjectAverages.length);
 
   return `
     <svg viewBox="0 0 ${width} ${height}" class="subject-bar-chart" role="img" aria-label="Average performance by subject bar chart">
-      <line x1="${padding}" y1="${height - padding}" x2="${width - padding}" y2="${height - padding}" stroke="#c4ccee" stroke-width="1.5" />
-      <line x1="${padding}" y1="${padding}" x2="${padding}" y2="${height - padding}" stroke="#c4ccee" stroke-width="1.5" />
+      <line x1="${padding}" y1="${height - padding}" x2="${width - padding}" y2="${height - padding}" stroke="${palette.axis}" stroke-width="1.5" />
+      <line x1="${padding}" y1="${padding}" x2="${padding}" y2="${height - padding}" stroke="${palette.axis}" stroke-width="1.5" />
       ${subjectAverages
         .map((s, i) => {
           const x = padding + i * (barWidth + barGap);
@@ -743,9 +941,9 @@ function buildSubjectBarChartSvg(subjectAverages) {
           return `
             <rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${barHeight.toFixed(
               1
-            )}" rx="6" fill="#5b4bdb" />
-            <text x="${(x + barWidth / 2).toFixed(1)}" y="${(y - 8).toFixed(1)}" text-anchor="middle" font-size="11" fill="#1b1f3b">${s.average}%</text>
-            <text x="${(x + barWidth / 2).toFixed(1)}" y="${(height - 16).toFixed(1)}" text-anchor="middle" font-size="10" fill="#5f6785">${shortLabel}</text>
+            )}" rx="6" fill="${palette.bar}" />
+            <text x="${(x + barWidth / 2).toFixed(1)}" y="${(y - 8).toFixed(1)}" text-anchor="middle" font-size="11" fill="${palette.text}">${s.average}%</text>
+            <text x="${(x + barWidth / 2).toFixed(1)}" y="${(height - 16).toFixed(1)}" text-anchor="middle" font-size="10" fill="${palette.muted}">${shortLabel}</text>
           `;
         })
         .join("")}
@@ -783,33 +981,52 @@ async function renderStudentDashboard() {
     : `<p class="small">No exams available right now.</p>`;
 
   app.innerHTML = `
-    <section class="card">
-      <div class="row">
-        <div>
-          <h2>Student Dashboard</h2>
-          <p class="small">Welcome, ${session.displayName}</p>
+    <div class="page-shell">
+      <section class="card hero-card">
+        <div class="hero-header">
+          <div>
+            <span class="hero-kicker">Student Workspace</span>
+            <h2 class="hero-title">Learning Performance Hub</h2>
+            <p class="small hero-summary">Welcome, ${session.displayName}. Attempt exams, track trends, diagnose weak topics, and get targeted support in one place.</p>
+          </div>
+          <div class="actions-right">
+            <button class="btn-muted" id="logoutBtn">Logout</button>
+          </div>
         </div>
-        <div style="text-align:right;">
-          <button class="btn-muted" id="logoutBtn">Logout</button>
-        </div>
-      </div>
-    </section>
+      </section>
 
-    <section class="card">
-      <h3>Available Exams</h3>
-      ${examsHtml}
-    </section>
-    <section class="card">
-      <h3>Results & Performance</h3>
-      <p class="small">Open the dedicated result portal with full statistics and trend graphs.</p>
-      <button class="btn-secondary" id="openResultPortalBtn">Open Result Portal</button>
-      <p class="small space-top">See which topics you struggled with most, broken down by exam.</p>
-      <button class="btn-secondary" id="openWeakAreaPortalBtn">Weak Area Analysis</button>
-      <p class="small space-top">Check your rank among other students overall and by exam.</p>
-      <button class="btn-secondary" id="openLeaderboardBtn">Leaderboard & Ranking</button>
-      <p class="small space-top">Ask anything (general AI) or get exam-specific guidance.</p>
-      <button class="btn-secondary" id="openAiChatbotBtn">AI Doubt Solver</button>
-    </section>
+      <div class="dashboard-grid">
+        <section class="card">
+          <h3>Available Exams</h3>
+          <div class="list-stack">${examsHtml}</div>
+        </section>
+        <section class="card">
+          <h3>Insights & Tools</h3>
+          <div class="action-grid">
+            <article class="action-tile">
+              <strong>Result Portal</strong>
+              <p class="small">Open full statistics, score trends, and exam-level performance cards.</p>
+              <button class="btn-secondary action-cta" id="openResultPortalBtn">Open Result Portal</button>
+            </article>
+            <article class="action-tile">
+              <strong>Weak Area Analysis</strong>
+              <p class="small">See which topics cost you the most marks by exam and attempt history.</p>
+              <button class="btn-secondary action-cta" id="openWeakAreaPortalBtn">Open Weak Areas</button>
+            </article>
+            <article class="action-tile">
+              <strong>Leaderboard & Ranking</strong>
+              <p class="small">Compare your performance with peers overall and for each exam.</p>
+              <button class="btn-secondary action-cta" id="openLeaderboardBtn">Open Leaderboard</button>
+            </article>
+            <article class="action-tile">
+              <strong>AI Doubt Solver</strong>
+              <p class="small">Ask conceptual or exam-specific questions with context-aware guidance.</p>
+              <button class="btn-secondary action-cta" id="openAiChatbotBtn">Open AI Tutor</button>
+            </article>
+          </div>
+        </section>
+      </div>
+    </div>
   `;
 
   document.getElementById("logoutBtn").addEventListener("click", clearSession);
@@ -916,46 +1133,54 @@ async function renderStudentResultPortal() {
   const subjectBarChart = buildSubjectBarChartSvg(subjectAverages);
 
   app.innerHTML = `
-    <section class="card">
-      <div class="row">
-        <div>
-          <h2>Result Portal</h2>
-          <p class="small">Comprehensive performance and performance tracking analytics</p>
+    <div class="page-shell">
+      <section class="card hero-card">
+        <div class="hero-header">
+          <div>
+            <span class="hero-kicker">Performance Intelligence</span>
+            <h2 class="hero-title">Result Portal</h2>
+            <p class="small hero-summary">Comprehensive performance tracking across attempts, subjects, and progression trends.</p>
+          </div>
+          <div class="actions-right">
+            <button class="btn-muted" id="backToStudentHomeBtn">Back</button>
+            <button class="btn-secondary" id="openWeakAreaFromResultBtn">Weak Area Analysis</button>
+            <button class="btn-secondary" id="openTargetedPracticeFromResultBtn">Targeted Practice</button>
+            <button class="btn-muted" id="logoutBtn">Logout</button>
+          </div>
         </div>
-        <div style="text-align:right;">
-          <button class="btn-muted" id="backToStudentHomeBtn">Back</button>
-          <button class="btn-secondary" id="openWeakAreaFromResultBtn">Weak Area Analysis</button>
-          <button class="btn-secondary" id="openTargetedPracticeFromResultBtn">Targeted Practice</button>
-          <button class="btn-muted" id="logoutBtn">Logout</button>
+        <div class="metric-strip">
+          <div class="metric-tile"><div class="small">Total Attempts</div><strong>${totalAttempts}</strong></div>
+          <div class="metric-tile"><div class="small">Average Score</div><strong>${avgScore}%</strong></div>
+          <div class="metric-tile"><div class="small">Best Score</div><strong>${bestScore}%</strong></div>
+          <div class="metric-tile"><div class="small">Pass Rate</div><strong>${passRate}%</strong></div>
         </div>
-      </div>
-      <div class="result-grid">
-        <div class="result-card"><div class="small">Total Attempts</div><strong>${totalAttempts}</strong></div>
-        <div class="result-card"><div class="small">Average Score</div><strong>${avgScore}%</strong></div>
-        <div class="result-card"><div class="small">Best Score</div><strong>${bestScore}%</strong></div>
-        <div class="result-card"><div class="small">Pass Rate</div><strong>${passRate}%</strong></div>
-      </div>
-      ${
-        totalAttempts === 0
-          ? '<button class="btn-secondary" id="generateDemoAttemptsBtn">Generate Demo Attempts</button>'
-          : ""
-      }
-    </section>
+        ${
+          totalAttempts === 0
+            ? '<button class="btn-secondary" id="generateDemoAttemptsBtn">Generate Demo Attempts</button>'
+            : ""
+        }
+      </section>
 
-    <section class="card">
-      <h3>Average Performance By Subject</h3>
-      <div class="trend-wrap">
-        ${subjectBarChart || '<p class="small">No subject chart data available.</p>'}
+      <div class="dashboard-grid">
+        <section class="card">
+          <h3>Average Performance By Subject</h3>
+          <div class="trend-wrap">
+            ${subjectBarChart || '<p class="small">No subject chart data available.</p>'}
+          </div>
+        </section>
+        <section class="card">
+          <h3>Subject Summary Cards</h3>
+          <div class="result-grid">${subjectAvgHtml}</div>
+        </section>
       </div>
-      <div class="result-grid">${subjectAvgHtml}</div>
-    </section>
 
-    <section class="card">
-      <h3>Performance Tracking</h3>
-      <p class="small">Attempt-wise trend across each subject exam.</p>
-    </section>
+      <section class="card">
+        <h3>Attempt-Wise Tracking</h3>
+        <p class="small">Detailed progression timeline and attempt cards by exam.</p>
+      </section>
 
-    ${examCards}
+      ${examCards}
+    </div>
   `;
   document.getElementById("backToStudentHomeBtn").addEventListener("click", renderStudentDashboard);
   document.getElementById("logoutBtn").addEventListener("click", clearSession);
@@ -999,7 +1224,7 @@ async function renderWeakAreaPortal() {
           <h2>Weak Area Analysis</h2>
           <p class="small">Topics ranked by how many questions you got wrong in each exam.</p>
         </div>
-        <div style="text-align:right;">
+        <div class="actions-right">
           <button class="btn-muted" id="weakAreaBackBtn">Back</button>
           <button class="btn-secondary" id="weakAreaToPracticeBtn">Targeted Practice</button>
           <button class="btn-muted" id="weakAreaLogoutBtn">Logout</button>
@@ -1106,7 +1331,7 @@ async function renderTargetedPracticePortal(presetExamId) {
           <h2>Targeted Practice</h2>
           <p class="small">Pick an exam, then a topic you missed often in that exam.</p>
         </div>
-        <div style="text-align:right;">
+        <div class="actions-right">
           <button class="btn-muted" id="backToResultPortalBtn">Back to Result Portal</button>
           <button class="btn-muted" id="toWeakAreaBtn">Weak Area Analysis</button>
           <button class="btn-muted" id="logoutBtn">Logout</button>
@@ -1377,45 +1602,48 @@ async function renderLeaderboardPortal() {
     : `<section class="card"><p class="small">No exams found for leaderboard.</p></section>`;
 
   app.innerHTML = `
-    <section class="card">
-      <div class="row">
-        <div>
-          <h2>Leaderboard & Ranking</h2>
-          <p class="small">Overall and exam-wise student ranks based on performance.</p>
+    <div class="page-shell">
+      <section class="card hero-card">
+        <div class="hero-header">
+          <div>
+            <span class="hero-kicker">Competitive Insights</span>
+            <h2 class="hero-title">Leaderboard & Ranking</h2>
+            <p class="small hero-summary">Overall and exam-specific standings based on average, best, and latest performance snapshots.</p>
+          </div>
+          <div class="actions-right">
+            <button class="btn-muted" id="leaderboardBackBtn">Back</button>
+            <button class="btn-muted" id="logoutBtn">Logout</button>
+          </div>
         </div>
-        <div style="text-align:right;">
-          <button class="btn-muted" id="leaderboardBackBtn">Back</button>
-          <button class="btn-muted" id="logoutBtn">Logout</button>
+        <div class="metric-strip">
+          <div class="metric-tile"><div class="small">Students Ranked</div><strong>${overallRows.length}</strong></div>
+          <div class="metric-tile"><div class="small">Your Overall Rank</div><strong>${
+            myOverall ? `#${myOverall.rank}` : "N/A"
+          }</strong></div>
+          <div class="metric-tile"><div class="small">Your Avg Score</div><strong>${
+            myOverall ? `${myOverall.average_score}%` : "N/A"
+          }</strong></div>
         </div>
-      </div>
-      <div class="result-grid">
-        <div class="result-card"><div class="small">Students Ranked</div><strong>${overallRows.length}</strong></div>
-        <div class="result-card"><div class="small">Your Overall Rank</div><strong>${
-          myOverall ? `#${myOverall.rank}` : "N/A"
-        }</strong></div>
-        <div class="result-card"><div class="small">Your Avg Score</div><strong>${
-          myOverall ? `${myOverall.average_score}%` : "N/A"
-        }</strong></div>
-      </div>
-    </section>
+      </section>
 
-    <section class="card">
-      <h3>Overall Top 10</h3>
-      <table class="leaderboard-table">
-        <thead>
-          <tr>
-            <th>Rank</th>
-            <th>Student</th>
-            <th>Average</th>
-            <th>Best</th>
-            <th>Attempts</th>
-          </tr>
-        </thead>
-        <tbody>${overallTableRows}</tbody>
-      </table>
-    </section>
+      <section class="card">
+        <h3>Overall Top 10</h3>
+        <table class="leaderboard-table">
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Student</th>
+              <th>Average</th>
+              <th>Best</th>
+              <th>Attempts</th>
+            </tr>
+          </thead>
+          <tbody>${overallTableRows}</tbody>
+        </table>
+      </section>
 
-    ${examBlocks}
+      ${examBlocks}
+    </div>
   `;
 
   document.getElementById("leaderboardBackBtn").addEventListener("click", renderStudentDashboard);
@@ -1435,26 +1663,29 @@ async function renderAiChatbotPortal() {
   }
 
   app.innerHTML = `
-    <section class="card">
-      <div class="row">
-        <div>
-          <h2>AI Doubt Solver</h2>
-          <p class="small">General AI assistant with optional exam-aware support (wrong answers, weak topics, practice).</p>
+    <div class="page-shell">
+      <section class="card hero-card">
+        <div class="hero-header">
+          <div>
+            <span class="hero-kicker">AI Assistance</span>
+            <h2 class="hero-title">AI Doubt Solver</h2>
+            <p class="small hero-summary">General AI assistant with exam-aware context for wrong answers, weak topics, and focused improvement.</p>
+          </div>
+          <div class="actions-right">
+            <button class="btn-muted" id="chatbotBackBtn">Back</button>
+            <button class="btn-muted" id="logoutBtn">Logout</button>
+          </div>
         </div>
-        <div style="text-align:right;">
-          <button class="btn-muted" id="chatbotBackBtn">Back</button>
-          <button class="btn-muted" id="logoutBtn">Logout</button>
-        </div>
-      </div>
-    </section>
+      </section>
 
-    <section class="card">
-      <h3>Chat</h3>
-      <div id="chatbotMessages" class="chatbot-messages"></div>
-      <label for="chatbotInput" class="space-top">Your doubt</label>
-      <textarea id="chatbotInput" placeholder="e.g. Explain difference between WHERE and HAVING with an example"></textarea>
-      <button class="btn-primary space-top" id="chatbotSendBtn">Ask AI Tutor</button>
-    </section>
+      <section class="card">
+        <h3>Conversation</h3>
+        <div id="chatbotMessages" class="chatbot-messages"></div>
+        <label for="chatbotInput" class="space-top">Your doubt</label>
+        <textarea id="chatbotInput" placeholder="e.g. Explain difference between WHERE and HAVING with an example"></textarea>
+        <button class="btn-primary space-top" id="chatbotSendBtn">Ask AI Tutor</button>
+      </section>
+    </div>
   `;
 
   const messagesEl = document.getElementById("chatbotMessages");
@@ -1574,27 +1805,32 @@ async function renderMentorDashboard() {
     : `<p class="small">No recent attempts from assigned students.</p>`;
 
   app.innerHTML = `
-    <section class="card">
-      <div class="row">
-        <div>
-          <h2>Mentor Dashboard</h2>
-          <p class="small">Welcome, ${session.displayName}</p>
+    <div class="page-shell">
+      <section class="card hero-card">
+        <div class="hero-header">
+          <div>
+            <span class="hero-kicker">Mentor Workspace</span>
+            <h2 class="hero-title">Mentor Dashboard</h2>
+            <p class="small hero-summary">Welcome, ${session.displayName}. Monitor assigned students and track recent attempt activity quickly.</p>
+          </div>
+          <div class="actions-right">
+            <button class="btn-muted" id="logoutBtn">Logout</button>
+          </div>
         </div>
-        <div style="text-align:right;">
-          <button class="btn-muted" id="logoutBtn">Logout</button>
-        </div>
+      </section>
+
+      <div class="dashboard-grid">
+        <section class="card">
+          <h3>Assigned Students Overview</h3>
+          <div class="result-grid">${studentCards}</div>
+        </section>
+
+        <section class="card">
+          <h3>Recent Performance Activity</h3>
+          <div class="list-stack">${recentList}</div>
+        </section>
       </div>
-    </section>
-
-    <section class="card">
-      <h3>Assigned Students Overview</h3>
-      <div class="result-grid">${studentCards}</div>
-    </section>
-
-    <section class="card">
-      <h3>Recent Performance Activity</h3>
-      ${recentList}
-    </section>
+    </div>
   `;
 
   document.getElementById("logoutBtn").addEventListener("click", clearSession);
@@ -1638,55 +1874,107 @@ async function renderExamAttempt(examId) {
     .join("");
 
   app.innerHTML = `
-    <section class="card">
-      <h2>${exam.title}</h2>
-      <p class="small">Attempt all questions and submit.</p>
-      ${questionsHtml}
-      <button class="btn-primary" id="submitExamBtn">Submit Exam</button>
-      <button class="btn-muted" id="cancelBtn">Cancel</button>
-    </section>
+    <div class="page-shell">
+      <section class="card hero-card">
+        <div class="hero-header">
+          <div>
+            <span class="hero-kicker">Live Assessment</span>
+            <h2 class="hero-title">${exam.title}</h2>
+            <p class="small hero-summary">Attempt every question carefully. Submit once all responses are selected.</p>
+          </div>
+          <div class="actions-right">
+            <button class="btn-muted" id="cancelBtn">Cancel</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h3>Question Set</h3>
+        <div class="list-stack">${questionsHtml}</div>
+        <button class="btn-primary" id="submitExamBtn">Submit Exam</button>
+      </section>
+    </div>
   `;
 
   document.getElementById("cancelBtn").addEventListener("click", renderStudentDashboard);
   document.getElementById("submitExamBtn").addEventListener("click", () => {
-    const answers = questions.map((q) => {
-      const selected = document.querySelector(`input[name="q${q.question_id}"]:checked`);
-      return {
-        questionId: q.question_id,
-        selectedOption: selected ? Number(selected.value) : 0
-      };
-    });
-
-    fetch(`${API_BASE}/exams/${examId}/submit`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        studentId: session.userId,
-        answers
-      })
-    })
-      .then(async (res) => ({ ok: res.ok, data: await res.json() }))
-      .then(({ ok, data }) => {
-        if (!ok) throw new Error(data.message || "Submission failed.");
-        const explanationPreview =
-          data.wrongAnswers && data.wrongAnswers.length
-            ? `\n\nWrong Answer Explanations:\n${data.wrongAnswers
-                .slice(0, 3)
-                .map(
-                  (w, idx) =>
-                    `${idx + 1}) ${w.questionText}\n   Selected: ${
-                      w.selectedOption || "Not answered"
-                    }, Correct: ${w.correctAnswer}\n   ${w.explanation}`
-                )
-                .join("\n\n")}${data.wrongAnswers.length > 3 ? "\n\n...more in this attempt review soon." : ""}`
-            : "";
-        alert(
-          `Exam submitted.\nAttempt #${data.attemptNumber}\nScore: ${data.rawScore}/${data.totalMarks}\nPercentage: ${data.percentage}%\nStatus: ${data.status}${explanationPreview}`
-        );
-        renderStudentDashboard();
-      })
-      .catch((err) => alert(err.message));
+  const answers = questions.map((q) => {
+    const selected = document.querySelector(`input[name="q${q.question_id}"]:checked`);
+    return {
+      questionId: q.question_id,
+      selectedOption: selected ? Number(selected.value) : 0
+    };
   });
+
+  fetch(`${API_BASE}/exams/${examId}/submit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      studentId: session.userId,
+      answers
+    })
+  })
+    .then(async (res) => ({ ok: res.ok, data: await res.json() }))
+    .then(({ ok, data }) => {
+      if (!ok) throw new Error(data.message || "Submission failed.");
+
+      const explanationPreview =
+        data.wrongAnswers && data.wrongAnswers.length
+          ? `\n\nWrong Answer Explanations:\n${data.wrongAnswers
+              .map(
+                (w, idx) =>
+                  `${idx + 1}) ${w.questionText}\n   Selected: ${
+                    w.selectedOption || "Not answered"
+                  }, Correct: ${w.correctAnswer}\n   ${
+                    w.explanation || "No explanation available"
+                  }`
+              )
+              .join("\n\n")}`
+          : "";
+
+      const modal = document.createElement("div");
+    modal.className = "modal-overlay";
+
+    const content = document.createElement("div");
+    content.className = "modal-content";
+
+let html = `
+  <h3>Exam Submitted</h3>
+  <p>Attempt #${data.attemptNumber}</p>
+  <p>Score: ${data.rawScore}/${data.totalMarks}</p>
+  <p>Percentage: ${data.percentage}%</p>
+  <p>Status: ${data.status}</p>
+`;
+
+if (data.wrongAnswers && data.wrongAnswers.length) {
+  html += `<h4>Wrong Answer Explanations:</h4>`;
+  data.wrongAnswers.forEach((w, idx) => {
+    html += `
+      <div class="modal-entry">
+        <strong>${idx + 1}) ${w.questionText}</strong><br/>
+        Selected: ${w.selectedOption || "Not answered"}<br/>
+        Correct: ${w.correctAnswer}<br/>
+        ${w.explanation || "No explanation available"}
+      </div>
+    `;
+  });
+}
+
+html += `<button id="closeModalBtn" class="btn-primary">OK</button>`;
+
+content.innerHTML = html;
+modal.appendChild(content);
+document.body.appendChild(modal);
+
+document.getElementById("closeModalBtn").onclick = () => {
+  modal.remove();
+  renderStudentDashboard();
+};
+
+      renderStudentDashboard();
+    })
+    .catch((err) => alert(err.message));
+});
 }
 
 function render() {
@@ -1705,4 +1993,5 @@ function render() {
   }
 }
 
+initTheme();
 render();

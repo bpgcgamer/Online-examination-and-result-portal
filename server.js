@@ -447,7 +447,7 @@ app.post("/api/auth/signup", async (req, res) => {
 
   try {
     if (role === "admin") {
-      const { username, fullName } = req.body;
+      const { username, fullName, securityQuestion, securityAnswer } = req.body;
       if (!username || !fullName) {
         return res.status(400).json({ message: "Username and full name are required for admin." });
       }
@@ -458,14 +458,14 @@ app.post("/api/auth/signup", async (req, res) => {
       }
 
       await pool.query(
-        "INSERT INTO admin (username, password, full_name) VALUES (?, ?, ?)",
-        [username, password, fullName]
+        "INSERT INTO admin (username, password, full_name, security_question, security_answer) VALUES (?, ?, ?, ?, ?)",
+        [username, password, fullName, securityQuestion || null, securityAnswer || null]
       );
       return res.status(201).json({ message: "Admin account created." });
     }
 
     if (role === "student") {
-      const { email, firstName, lastName, enrollmentNo } = req.body;
+      const { email, firstName, lastName, enrollmentNo, securityQuestion, securityAnswer } = req.body;
       if (!email || !firstName || !lastName || !enrollmentNo) {
         return res.status(400).json({ message: "All student fields are required." });
       }
@@ -475,12 +475,15 @@ app.post("/api/auth/signup", async (req, res) => {
         return res.status(409).json({ message: "Student email already exists." });
       }
 
-      await pool.query("CALL Add_Student(?, ?, ?, ?, ?)", [email, password, firstName, lastName, enrollmentNo]);
+      await pool.query(
+        "INSERT INTO student (email, password, first_name, last_name, enrollment_no, security_question, security_answer) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [email, password, firstName, lastName, enrollmentNo, securityQuestion || null, securityAnswer || null]
+      );
       return res.status(201).json({ message: "Student account created." });
     }
 
     if (role === "mentor") {
-      const { username, fullName } = req.body;
+      const { username, fullName, securityQuestion, securityAnswer } = req.body;
       if (!username || !fullName) {
         return res.status(400).json({ message: "Username and full name are required for mentor." });
       }
@@ -491,8 +494,8 @@ app.post("/api/auth/signup", async (req, res) => {
       }
 
       await pool.query(
-        "INSERT INTO mentor (username, password, full_name) VALUES (?, ?, ?)",
-        [username, password, fullName]
+        "INSERT INTO mentor (username, password, full_name, security_question, security_answer) VALUES (?, ?, ?, ?, ?)",
+        [username, password, fullName, securityQuestion || null, securityAnswer || null]
       );
       return res.status(201).json({ message: "Mentor account created." });
     }
@@ -554,6 +557,90 @@ app.post("/api/auth/login", async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ message: error.message });
+  }
+});
+
+app.post("/api/auth/forgot-password", async (req, res) => {
+  const { role, identifier } = req.body;
+  if (!role || !identifier) {
+    return res.status(400).json({ message: "Role and identifier are required." });
+  }
+
+  try {
+    let table = role === "student" ? "student" : role === "admin" ? "admin" : "mentor";
+    let idCol = role === "student" ? "email" : "username";
+
+    const [rows] = await pool.query(
+      `SELECT security_question FROM ${table} WHERE ${idCol} = ?`,
+      [identifier]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ message: "User not found." });
+    }
+
+    if (!rows[0].security_question) {
+      return res.status(400).json({ message: "Security question not set for this account." });
+    }
+
+    res.json({ securityQuestion: rows[0].security_question });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+app.post("/api/auth/reset-password", async (req, res) => {
+  const { role, identifier, securityAnswer, newPassword } = req.body;
+  if (!role || !identifier || !securityAnswer || !newPassword) {
+    return res.status(400).json({ message: "All fields are required." });
+  }
+
+  try {
+    let table = role === "student" ? "student" : role === "admin" ? "admin" : "mentor";
+    let idCol = role === "student" ? "email" : "username";
+
+    const [rows] = await pool.query(
+      `SELECT security_answer FROM ${table} WHERE ${idCol} = ?`,
+      [identifier]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ message: "User not found." });
+    }
+
+    if (rows[0].security_answer !== securityAnswer) {
+      return res.status(401).json({ message: "Incorrect security answer." });
+    }
+
+    await pool.query(
+      `UPDATE ${table} SET password = ? WHERE ${idCol} = ?`,
+      [newPassword, identifier]
+    );
+
+    res.json({ message: "Password reset successful." });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+app.post("/api/auth/update-security", async (req, res) => {
+  const { role, identifier, securityQuestion, securityAnswer } = req.body;
+  if (!role || !identifier || !securityQuestion || !securityAnswer) {
+    return res.status(400).json({ message: "All fields are required." });
+  }
+
+  try {
+    let table = role === "student" ? "student" : role === "admin" ? "admin" : "mentor";
+    let idCol = role === "student" ? "email" : "username";
+
+    await pool.query(
+      `UPDATE ${table} SET security_question = ?, security_answer = ? WHERE ${idCol} = ?`,
+      [securityQuestion, securityAnswer, identifier]
+    );
+
+    res.json({ message: "Security settings updated successfully." });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
   }
 });
 
